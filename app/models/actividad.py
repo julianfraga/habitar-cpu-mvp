@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, Numeric, String, Text, func, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from app.models.carrera import Carrera
     from app.models.docente import Docente
     from app.models.inscripcion import Inscripcion
+    from app.models.respuesta_encuesta import RespuestaEncuesta
     from app.models.user import User
 
 
@@ -46,6 +47,9 @@ class Actividad(Base):
     encuesta_obligatoria: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )
+    preguntas: Mapped[dict[str, str]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
     cupo_max: Mapped[int] = mapped_column(Integer, default=30)
     estado: Mapped[str] = mapped_column(String(20), default=ESTADO_BORRADOR, index=True)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
@@ -59,6 +63,9 @@ class Actividad(Base):
     carreras_asociadas: Mapped[list["Carrera"]] = relationship(
         secondary=actividad_carrera,
         back_populates="actividades",
+    )
+    respuestas_encuesta: Mapped[list["RespuestaEncuesta"]] = relationship(
+        back_populates="actividad", cascade="all, delete-orphan"
     )
     @property
     def finalizada(self) -> bool:

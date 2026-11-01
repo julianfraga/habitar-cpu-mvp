@@ -160,18 +160,22 @@ def actualizar(
         )
     form_data = services.actividades.actividad_form_data(form)
     try:
-        contexto = services.actividades.crear_contexto_actividad(form, db)
+        contexto = services.actividades.crear_contexto_actividad(
+            form, db, actividad=a
+        )
     except ValueError as exc:
         db.rollback()
         return _render_edit_form(request, a, user, db, error=str(exc), form_data=form_data)
 
     was_published = a.estado == ESTADO_PUBLICADA
     fecha_cambio = a.fecha_inicio != contexto.fecha_inicio
-    services.actividades.update(
-        db,
-        a,
-        contexto,
-    )
+    try:
+        services.actividades.update(db, a, contexto)
+    except ValueError as exc:
+        db.rollback()
+        return _render_edit_form(
+            request, a, user, db, error=str(exc), form_data=form_data
+        )
     if not contexto.encuesta_obligatoria:
         estudiantes_pendientes = (
             db.query(Asistencia.user_id)

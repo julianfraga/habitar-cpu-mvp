@@ -3,7 +3,22 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.models import Actividad, SurveyResponse
+from app.models import Actividad, RespuestaEncuesta
+
+
+def preparar_respuestas(
+    actividad: Actividad,
+    respuestas: list[str],
+) -> dict[str, str]:
+    preguntas = actividad.preguntas or {}
+    claves = sorted(preguntas, key=lambda clave: int(clave[1:]))
+    if not claves or len(respuestas) != len(claves):
+        raise ValueError("Respondé todas las preguntas de la encuesta.")
+
+    respuestas_limpias = [respuesta.strip() for respuesta in respuestas]
+    if any(not respuesta for respuesta in respuestas_limpias):
+        raise ValueError("Todas las respuestas son obligatorias.")
+    return dict(zip(claves, respuestas_limpias))
 
 
 def estudiante_completo_encuesta(
@@ -15,10 +30,10 @@ def estudiante_completo_encuesta(
     if not actividad.encuesta_obligatoria:
         return True
     return (
-        db.query(SurveyResponse.id)
+        db.query(RespuestaEncuesta.id)
         .filter(
-            SurveyResponse.user_id == estudiante_id,
-            SurveyResponse.actividad_id == actividad_id,
+            RespuestaEncuesta.estudiante_id == estudiante_id,
+            RespuestaEncuesta.actividad_id == actividad_id,
         )
         .first()
         is not None

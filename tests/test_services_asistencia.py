@@ -9,7 +9,7 @@ from app.models import (
     ESTADO_CREDITOS_ACREDITADO,
     ESTADO_CREDITOS_PENDIENTE_ENCUESTA,
     ESTADO_PUBLICADA,
-    SurveyResponse,
+    RespuestaEncuesta,
 )
 from app.services import asistencia
 from app.services.asistencia import (
@@ -21,7 +21,10 @@ from app.services.asistencia import (
     present_user_ids,
     acreditar_creditos_pendientes,
 )
-from app.services.encuestas import estudiante_completo_encuesta
+from app.services.encuestas import (
+    estudiante_completo_encuesta,
+    preparar_respuestas,
+)
 from app.services.credits import accumulated_credits
 from app.services.inscripcion import inscribir
 
@@ -229,11 +232,11 @@ def test_check_in_defers_credits_until_survey_then_releases_once(
     )
 
     db_session.add(
-        SurveyResponse(
+        RespuestaEncuesta(
             actividad_id=actividad.id,
-            user_id=estudiante.id,
+            estudiante_id=estudiante.id,
+            respuestas={"q1": "Completada"},
             rating=5,
-            comment=None,
         )
     )
     db_session.flush()
@@ -274,6 +277,21 @@ def test_survey_not_required_credits_are_awarded_immediately(
     assert estudiante_completo_encuesta(
         db_session, estudiante.id, actividad.id
     )
+
+
+def test_preparar_respuestas_validates_and_maps_dynamic_questions(
+    actividad_factory,
+):
+    actividad = actividad_factory(
+        preguntas={"q1": "Pregunta uno", "q2": "Pregunta dos"}
+    )
+
+    assert preparar_respuestas(actividad, [" respuesta 1 ", "respuesta 2"]) == {
+        "q1": "respuesta 1",
+        "q2": "respuesta 2",
+    }
+    with pytest.raises(ValueError, match="todas las preguntas"):
+        preparar_respuestas(actividad, ["respuesta 1"])
 
 
 @pytest.mark.parametrize(

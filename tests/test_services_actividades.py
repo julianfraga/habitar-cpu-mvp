@@ -11,6 +11,7 @@ from app.models import (
     ESTADO_PUBLICADA,
     Inscripcion,
     Persona,
+    RespuestaEncuesta,
 )
 from app.services.actividades import (
     ActividadContext,
@@ -199,6 +200,7 @@ def test_create_y_update_persisten_actividad(db_session):
         creditos=Decimal("1"),
         cupo_max=30,
         encuesta_obligatoria=True,
+        preguntas={"q1": "¿Qué te pareció la actividad?"},
         carreras_asociadas=[],
     )
     actividad = create(
@@ -215,6 +217,39 @@ def test_create_y_update_persisten_actividad(db_session):
     assert get(db_session, actividad.id).titulo == "Actividad actualizada"
     assert get(db_session, actividad.id).creditos == 5
     assert get(db_session, actividad.id).estado == ESTADO_BORRADOR
+
+
+def test_update_rejects_changing_survey_questions_after_response(
+    db_session, actividad_factory, user_factory
+):
+    actividad = actividad_factory()
+    estudiante = user_factory()
+    db_session.add(
+        RespuestaEncuesta(
+            actividad_id=actividad.id,
+            estudiante_id=estudiante.id,
+            respuestas={"q1": "Respuesta"},
+            rating=5,
+        )
+    )
+    db_session.commit()
+    contexto = ActividadContext(
+        titulo=actividad.titulo,
+        descripcion=actividad.descripcion,
+        tipo=actividad.tipo,
+        fecha_inicio=actividad.fecha_inicio,
+        fecha_fin=actividad.fecha_fin,
+        lugar=actividad.lugar,
+        docentes=[],
+        creditos=Decimal(str(actividad.creditos)),
+        cupo_max=actividad.cupo_max,
+        encuesta_obligatoria=actividad.encuesta_obligatoria,
+        preguntas={"q1": "Pregunta modificada"},
+        carreras_asociadas=[],
+    )
+
+    with pytest.raises(ValueError, match="después de recibir respuestas"):
+        update(db_session, actividad, contexto)
 
 
 def test_update_estado_actualiza_estado_sin_requerir_contexto(

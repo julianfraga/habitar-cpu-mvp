@@ -10,7 +10,7 @@ from app.models import (
     ESTADO_PUBLICADA,
     Inscripcion,
     INSCRIPCION_ALTA,
-    SurveyResponse,
+    RespuestaEncuesta,
 )
 
 
@@ -73,12 +73,12 @@ def survey_averages(db: Session) -> list[dict]:
     rows = (
         db.query(
             Actividad.titulo,
-            func.avg(SurveyResponse.rating).label("avg"),
-            func.count(SurveyResponse.id).label("n"),
+            func.avg(RespuestaEncuesta.rating).label("avg"),
+            func.count(RespuestaEncuesta.id).label("n"),
         )
-        .join(SurveyResponse, SurveyResponse.actividad_id == Actividad.id)
+        .join(RespuestaEncuesta, RespuestaEncuesta.actividad_id == Actividad.id)
         .group_by(Actividad.id, Actividad.titulo)
-        .order_by(func.avg(SurveyResponse.rating).desc())
+        .order_by(func.avg(RespuestaEncuesta.rating).desc())
         .all()
     )
     return [

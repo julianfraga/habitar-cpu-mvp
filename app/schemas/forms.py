@@ -19,7 +19,13 @@ class ActividadForm(BaseModel):
     creditos: str = "1"
     cupo_max: int = 30
     encuesta_obligatoria: bool = True
+    preguntas: list[str] = Field(default_factory=list, max_length=5)
     carreras_asociadas: list[str] = Field(default_factory=list)
+
+
+class RespuestaEncuestaForm(BaseModel):
+    rating: int
+    respuestas: list[str] = Field(default_factory=list)
 
 
 class SignupForm(BaseModel):

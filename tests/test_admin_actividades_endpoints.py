@@ -65,6 +65,8 @@ def actividad_form_data(docente_id, carrera_id, *, titulo="Actividad nueva"):
         "docentes_emails": [" EVA@Example.com "],
         "creditos": "2.5",
         "cupo_max": "20",
+        "encuesta_obligatoria": "true",
+        "preguntas": ["¿Qué te pareció la actividad?"],
         "carreras_asociadas": str(carrera_id),
     }
 
@@ -249,6 +251,19 @@ def test_create_activity_rejects_credits_not_in_half_point_steps(admin_actividad
 
     assert response.status_code == 303
     assert "múltiplo de 0,5" in redirect_query(response, "err")
+    assert db_session.query(Actividad).count() == 0
+
+
+def test_create_activity_rejects_more_than_five_survey_questions(
+    admin_actividades_client,
+):
+    client, db_session, docente, carrera = admin_actividades_client
+    data = actividad_form_data(docente.docente_id, carrera.id)
+    data["preguntas"] = [f"Pregunta {index}" for index in range(1, 7)]
+
+    response = client.post("/admin/actividades", data=data)
+
+    assert response.status_code == 422
     assert db_session.query(Actividad).count() == 0
 
 

@@ -11,7 +11,7 @@ from app.models import (
     ESTADO_CREDITOS_ACREDITADO,
     ESTADO_CREDITOS_PENDIENTE_ENCUESTA,
     ESTADO_PUBLICADA,
-    SurveyResponse,
+    RespuestaEncuesta,
 )
 from app.security import hash_password
 from app.services import asistencia as services_asistencia
@@ -33,6 +33,10 @@ def test_manual_attendance_stays_valid_and_survey_submission_awards_credits(
         creditos=4,
         fecha_inicio=datetime.now(timezone.utc) + timedelta(days=2),
     )
+    activity.preguntas = {
+        "q1": "¿Qué te pareció la actividad?",
+        "q2": "¿Qué mejorarías?",
+    }
     activity.docentes.append(teacher.docente)
     db_session.commit()
     inscribir(db_session, activity.id, student.id)
@@ -79,13 +83,28 @@ def test_manual_attendance_stays_valid_and_survey_submission_awards_credits(
             assert f'href="/actividades/{activity.id}/encuesta"' in home_response.text
             survey_response = client.post(
                 f"/actividades/{activity.id}/encuesta",
-                data={"rating": "5", "comment": "Completada"},
+                data={
+                    "rating": "5",
+                    "respuestas": ["Completada", "Nada"],
+                },
+            )
+            answered_form = client.get(
+                f"/actividades/{activity.id}/encuesta"
             )
     finally:
         app.dependency_overrides.pop(get_db, None)
 
     assert survey_response.status_code == 303
     db_session.refresh(attendance)
+    saved_response = db_session.query(RespuestaEncuesta).one()
+    assert saved_response.rating == 5
+    assert saved_response.respuestas == {
+        "q1": "Completada",
+        "q2": "Nada",
+    }
+    assert answered_form.status_code == 200
+    assert "Completada" in answered_form.text
+    assert "Nada" in answered_form.text
     assert attendance.estado_creditos == ESTADO_CREDITOS_ACREDITADO
     assert db_session.query(Asistencia).count() == 1
     assert accumulated_credits(db_session, student.id) == activity.creditos
@@ -183,9 +202,10 @@ def test_revoking_credited_attendance_reverses_credits(
         )
     )
     db_session.add(
-        SurveyResponse(
+        RespuestaEncuesta(
             actividad_id=activity.id,
-            user_id=student.id,
+            estudiante_id=student.id,
+            respuestas={"q1": "Completada"},
             rating=5,
         )
     )

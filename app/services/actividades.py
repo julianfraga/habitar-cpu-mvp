@@ -19,6 +19,7 @@ from app.models import (
     INSCRIPCION_ALTA,
     Carrera,
     Persona,
+    RespuestaEncuesta,
 )
 from app.services.parsing import (
     formatear_duracion,
@@ -48,6 +49,7 @@ class ActividadContext:
     creditos: Decimal
     cupo_max: int
     encuesta_obligatoria: bool
+    preguntas: dict[str, str]
     carreras_asociadas: list[Carrera]
 
 
@@ -80,6 +82,10 @@ def actividad_edit_form_data(actividad: Actividad) -> dict[str, object]:
         "creditos": str(actividad.creditos),
         "cupo_max": actividad.cupo_max,
         "encuesta_obligatoria": actividad.encuesta_obligatoria,
+        "preguntas": [
+            actividad.preguntas[key]
+            for key in sorted(actividad.preguntas, key=lambda value: int(value[1:]))
+        ],
         "carreras_asociadas": [
             str(carrera.id) for carrera in actividad.carreras_asociadas
         ],
@@ -89,6 +95,7 @@ def actividad_edit_form_data(actividad: Actividad) -> dict[str, object]:
 def crear_contexto_actividad(
     form: ActividadForm,
     db: Session,
+    actividad: Actividad | None = None,
 ) -> ActividadContext:
     try:
         inicio, fin = parse_intervalo_tiempo(
@@ -101,6 +108,33 @@ def crear_contexto_actividad(
         raise ValueError("Fechas inválidas: revisá inicio y fin.") from None
 
     creditos = validar_creditos(form.creditos)
+    if len(form.preguntas) > 5:
+        raise ValueError("La encuesta admite como máximo cinco preguntas.")
+    preguntas_limpias = [pregunta.strip() for pregunta in form.preguntas]
+    if form.encuesta_obligatoria and (
+        not preguntas_limpias or any(not pregunta for pregunta in preguntas_limpias)
+    ):
+        raise ValueError("Cada pregunta de la encuesta debe tener texto.")
+    preguntas_validas = [
+        pregunta for pregunta in preguntas_limpias if pregunta
+    ]
+    preguntas = {
+        f"q{index}": pregunta
+        for index, pregunta in enumerate(preguntas_validas, start=1)
+    }
+    if actividad is not None and not form.encuesta_obligatoria and not preguntas:
+        preguntas = actividad.preguntas
+    if (
+        actividad is not None
+        and actividad.preguntas != preguntas
+        and db.query(RespuestaEncuesta.id)
+        .filter(RespuestaEncuesta.actividad_id == actividad.id)
+        .first()
+        is not None
+    ):
+        raise ValueError(
+            "No se pueden modificar las preguntas después de recibir respuestas."
+        )
     docentes = resolver_docentes(
         db,
         DocentesInput(
@@ -125,6 +159,7 @@ def crear_contexto_actividad(
         creditos=creditos,
         cupo_max=form.cupo_max,
         encuesta_obligatoria=form.encuesta_obligatoria,
+        preguntas=preguntas,
         carreras_asociadas=carreras,
     )
 
@@ -385,6 +420,7 @@ def create(
         creditos=validar_creditos(contexto.creditos),
         cupo_max=contexto.cupo_max,
         encuesta_obligatoria=contexto.encuesta_obligatoria,
+        preguntas=contexto.preguntas,
         carreras_asociadas=contexto.carreras_asociadas,
         estado=estado,
         created_by=created_by,
@@ -401,6 +437,12 @@ def update(
     contexto: ActividadContext,
 ) -> Actividad:
     '''Actualiza los campos de la actividad con los valores del contexto.'''
+    if actividad.preguntas != contexto.preguntas and db.query(
+        RespuestaEncuesta.id
+    ).filter(RespuestaEncuesta.actividad_id == actividad.id).first():
+        raise ValueError(
+            "No se pueden modificar las preguntas después de recibir respuestas."
+        )
     actividad.titulo = contexto.titulo
     actividad.descripcion = contexto.descripcion
     actividad.tipo = contexto.tipo
@@ -411,6 +453,7 @@ def update(
     actividad.creditos = validar_creditos(contexto.creditos)
     actividad.cupo_max = contexto.cupo_max
     actividad.encuesta_obligatoria = contexto.encuesta_obligatoria
+    actividad.preguntas = contexto.preguntas
     actividad.carreras_asociadas = contexto.carreras_asociadas
     if not contexto.carreras_asociadas:
         actividad.estado = ESTADO_BORRADOR

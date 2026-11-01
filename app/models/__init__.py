@@ -13,7 +13,7 @@ from .notification import Notification
 from .mensaje import Mensaje, MensajeLectura
 from .password_reset import PasswordReset
 from .sesion_asistencia import SesionAsistencia
-from .survey_response import SurveyResponse
+from .respuesta_encuesta import RespuestaEncuesta
 from .ventana_asistencia import VentanaAsistencia
 
 
@@ -32,7 +32,7 @@ __all__ = [
 	"MensajeLectura",
 	"PasswordReset",
 	"SesionAsistencia",
-	"SurveyResponse",
+	"RespuestaEncuesta",
 	"TipoCarrera",
 	"User",
 	"VentanaAsistencia",

@@ -2,7 +2,7 @@ from app.models import (
     Asistencia,
     ESTADO_PUBLICADA,
     Inscripcion,
-    SurveyResponse,
+    RespuestaEncuesta,
 )
 from app.services.analytics import (
     asistencia_per_actividad,
@@ -78,9 +78,24 @@ def test_survey_averages_ordena_y_redondea(db_session, actividad_factory, user_f
     usuarios = [user_factory() for _ in range(3)]
     db_session.add_all(
         [
-            SurveyResponse(actividad_id=mejor.id, user_id=usuarios[0].id, rating=5),
-            SurveyResponse(actividad_id=mejor.id, user_id=usuarios[1].id, rating=4),
-            SurveyResponse(actividad_id=otra.id, user_id=usuarios[2].id, rating=3),
+            RespuestaEncuesta(
+                actividad_id=mejor.id,
+                estudiante_id=usuarios[0].id,
+                respuestas={"q1": "Muy buena"},
+                rating=5,
+            ),
+            RespuestaEncuesta(
+                actividad_id=mejor.id,
+                estudiante_id=usuarios[1].id,
+                respuestas={"q1": "Buena"},
+                rating=4,
+            ),
+            RespuestaEncuesta(
+                actividad_id=otra.id,
+                estudiante_id=usuarios[2].id,
+                respuestas={"q1": "Regular"},
+                rating=3,
+            ),
         ]
     )
     db_session.commit()

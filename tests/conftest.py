@@ -98,6 +98,7 @@ def actividad_factory(db_session):
         tipo="presencial",
         carreras=None,
         encuesta_obligatoria=True,
+        preguntas=None,
     ):
         nonlocal counter
         counter += 1
@@ -113,6 +114,9 @@ def actividad_factory(db_session):
             cupo_max=cupo_max,
             estado=estado,
             encuesta_obligatoria=encuesta_obligatoria,
+            preguntas=preguntas
+            if preguntas is not None
+            else {"q1": "¿Qué te pareció la actividad?"},
         )
         if carreras:
             actividad.carreras_asociadas.extend(carreras)

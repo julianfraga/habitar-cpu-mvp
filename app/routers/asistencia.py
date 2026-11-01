@@ -1,6 +1,8 @@
 """E-05 QR asistencia (docente rotating code + student check-in) and E-06 survey."""
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.exc import IntegrityError
@@ -11,13 +13,14 @@ from app.models import (
     Actividad,
     Asistencia,
     ESTADO_PUBLICADA,
-    SurveyResponse,
+    RespuestaEncuesta,
     User,
     VentanaAsistencia,
 )
 from app.security import requiere_roles
 from app import services
 from app.templating import redirect_to, render
+from app.schemas.forms import RespuestaEncuestaForm
 
 router = APIRouter()
 
@@ -170,8 +173,11 @@ def survey_form(
             query_params={"err": "Solo podés responder la encuesta de actividades a las que asististe."},
         )
     answered = (
-        db.query(SurveyResponse)
-        .filter(SurveyResponse.actividad_id == actividad_id, SurveyResponse.user_id == user.id)
+        db.query(RespuestaEncuesta)
+        .filter(
+            RespuestaEncuesta.actividad_id == actividad_id,
+            RespuestaEncuesta.estudiante_id == user.id,
+        )
         .first()
     )
     return render(request, "student/encuesta.html", user=user, db=db, a=actividad, answered=answered)
@@ -181,8 +187,7 @@ def survey_form(
 def survey_submit(
     request: Request,
     actividad_id: int,
-    rating: int = Form(...),
-    comment: str = Form(""),
+    form: Annotated[RespuestaEncuestaForm, Form()],
     user: User = Depends(requiere_roles("estudiante")),
     db: Session = Depends(get_db),
 ):
@@ -200,31 +205,54 @@ def survey_submit(
             query_params={"err": "No podés responder esta encuesta."},
         )
     existing = (
-        db.query(SurveyResponse)
-        .filter(SurveyResponse.actividad_id == actividad_id, SurveyResponse.user_id == user.id)
+        db.query(RespuestaEncuesta)
+        .filter(
+            RespuestaEncuesta.actividad_id == actividad_id,
+            RespuestaEncuesta.estudiante_id == user.id,
+        )
         .first()
     )
-    rating = max(1, min(5, rating))
-    comment_val = comment.strip() or None
+    try:
+        respuestas = services.encuestas.preparar_respuestas(
+            actividad, form.respuestas
+        )
+    except ValueError as exc:
+        return redirect_to(
+            request,
+            "survey_form",
+            actividad_id=actividad_id,
+            query_params={"err": str(exc)},
+        )
+    rating = max(1, min(5, form.rating))
     if existing:
         existing.rating = rating
-        existing.comment = comment_val
+        existing.respuestas = respuestas
     else:
-        db.add(SurveyResponse(actividad_id=actividad_id, user_id=user.id, rating=rating, comment=comment_val))
+        db.add(
+            RespuestaEncuesta(
+                actividad_id=actividad_id,
+                estudiante_id=user.id,
+                rating=rating,
+                respuestas=respuestas,
+            )
+        )
         try:
             db.flush()
         except IntegrityError:
             # Concurrent double-submit: a row was inserted between our check and commit.
             db.rollback()
             row = (
-                db.query(SurveyResponse)
-                .filter(SurveyResponse.actividad_id == actividad_id, SurveyResponse.user_id == user.id)
+                db.query(RespuestaEncuesta)
+                .filter(
+                    RespuestaEncuesta.actividad_id == actividad_id,
+                    RespuestaEncuesta.estudiante_id == user.id,
+                )
                 .first()
             )
             if row is None:
                 raise
             row.rating = rating
-            row.comment = comment_val
+            row.respuestas = respuestas
     credited = services.asistencia.acreditar_creditos_pendientes(
         db, actividad_id, user.id
     )

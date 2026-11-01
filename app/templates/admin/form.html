@@ -289,7 +289,7 @@
 
       <div>
         <label class="block type-body-small weight-medium mb-1">Encuesta post-actividad</label>
-        <select name="encuesta_obligatoria" class="w-full border-width radius-control px-3 py-2">
+        <select id="encuesta-obligatoria" name="encuesta_obligatoria" class="w-full border-width radius-control px-3 py-2">
           <option value="true" {% if valores_formulario.get('encuesta_obligatoria', a.encuesta_obligatoria if a else true) %}selected{% endif %}>
             Obligatoria para acreditar créditos
           </option>
@@ -299,6 +299,23 @@
         </select>
       </div>
 
+    </div>
+
+    {% if valores_formulario.get('preguntas') is not none %}
+      {% set preguntas_form = valores_formulario.get('preguntas') %}
+    {% elif a %}
+      {% set preguntas_form = a.preguntas.values()|list %}
+    {% else %}
+      {% set preguntas_form = [''] %}
+    {% endif %}
+    <div id="preguntas-encuesta" class="space-y-2">
+      <label class="block type-body-small weight-medium">Preguntas de la encuesta (máximo 5)</label>
+      <div id="preguntas-encuesta-list" class="space-y-2">
+        {% for pregunta in preguntas_form %}
+        <input name="preguntas" value="{{ pregunta }}" required placeholder="Pregunta {{ loop.index }}" class="w-full border-width radius-control px-3 py-2">
+        {% endfor %}
+      </div>
+      <button id="agregar-pregunta" type="button" class="text-link type-body-small weight-medium">(+) Agregar pregunta</button>
     </div>
 
     <div class="flex gap-2 pt-2">
@@ -438,6 +455,39 @@
     `;
     docentesNuevos.appendChild(fila);
   });
+
+  const encuestaObligatoria = document.getElementById('encuesta-obligatoria');
+  const preguntasEncuesta = document.getElementById('preguntas-encuesta');
+  const preguntasLista = document.getElementById('preguntas-encuesta-list');
+  const agregarPregunta = document.getElementById('agregar-pregunta');
+
+  function actualizarPreguntasEncuesta() {
+    const activa = encuestaObligatoria.value === 'true';
+    const preguntas = preguntasLista.querySelectorAll('input[name="preguntas"]');
+    if (activa && preguntas.length === 0) {
+      agregarPregunta.click();
+    }
+    preguntasEncuesta.classList.toggle('hidden', !activa);
+    preguntasLista.querySelectorAll('input[name="preguntas"]').forEach((input) => {
+      input.required = activa;
+    });
+    agregarPregunta.hidden = preguntasLista.querySelectorAll('input[name="preguntas"]').length >= 5;
+  }
+
+  agregarPregunta.addEventListener('click', () => {
+    const preguntas = preguntasLista.querySelectorAll('input[name="preguntas"]');
+    if (preguntas.length >= 5) return;
+    const input = document.createElement('input');
+    input.name = 'preguntas';
+    input.placeholder = `Pregunta ${preguntas.length + 1}`;
+    input.required = encuestaObligatoria.value === 'true';
+    input.className = 'w-full border-width radius-control px-3 py-2';
+    preguntasLista.appendChild(input);
+    actualizarPreguntasEncuesta();
+  });
+
+  encuestaObligatoria.addEventListener('change', actualizarPreguntasEncuesta);
+  actualizarPreguntasEncuesta();
 
 </script>
 

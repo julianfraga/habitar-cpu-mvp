@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.user import User
     from app.models.carrera import Carrera
+    from app.models.respuesta_encuesta import RespuestaEncuesta
 
 class Estudiante(Base):
     __tablename__ = "estudiantes"
@@ -34,6 +35,9 @@ class Estudiante(Base):
 
     user: Mapped["User"] = relationship(back_populates="estudiante")
     carrera: Mapped["Carrera | None"] = relationship(back_populates="estudiantes")
+    respuestas_encuesta: Mapped[list["RespuestaEncuesta"]] = relationship(
+        back_populates="estudiante", cascade="all, delete-orphan"
+    )
 
     @property
     def nombre_completo(self) -> str:
