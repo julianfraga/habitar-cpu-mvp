@@ -142,6 +142,8 @@ def test_admin_activities_crud_lifecycle(admin_actividades_client):
     new_page = client.get("/admin/actividades/nueva")
     assert new_page.status_code == 200
     assert "Nueva actividad" in new_page.text
+    assert 'aria-label="Eliminar pregunta"' in new_page.text
+    assert 'title="Pregunta' not in new_page.text
 
     create_response = client.post(
         "/admin/actividades",
@@ -265,6 +267,18 @@ def test_create_activity_rejects_more_than_five_survey_questions(
 
     assert response.status_code == 422
     assert db_session.query(Actividad).count() == 0
+
+
+def test_create_activity_ignores_empty_survey_questions(admin_actividades_client):
+    client, db_session, docente, carrera = admin_actividades_client
+    data = actividad_form_data(docente.docente_id, carrera.id)
+    data["preguntas"] = ["Pregunta 1", "", "  ", "Pregunta 2"]
+
+    response = client.post("/admin/actividades", data=data)
+
+    assert response.status_code == 303
+    actividad = db_session.query(Actividad).one()
+    assert actividad.preguntas == {"q1": "Pregunta 1", "q2": "Pregunta 2"}
 
 
 def test_user_with_matching_name_keeps_separate_persona_from_docente(

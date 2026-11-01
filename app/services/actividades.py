@@ -111,13 +111,11 @@ def crear_contexto_actividad(
     if len(form.preguntas) > 5:
         raise ValueError("La encuesta admite como máximo cinco preguntas.")
     preguntas_limpias = [pregunta.strip() for pregunta in form.preguntas]
-    if form.encuesta_obligatoria and (
-        not preguntas_limpias or any(not pregunta for pregunta in preguntas_limpias)
-    ):
-        raise ValueError("Cada pregunta de la encuesta debe tener texto.")
     preguntas_validas = [
         pregunta for pregunta in preguntas_limpias if pregunta
     ]
+    if form.encuesta_obligatoria and not preguntas_validas:
+        raise ValueError("La encuesta debe incluir al menos una pregunta.")
     preguntas = {
         f"q{index}": pregunta
         for index, pregunta in enumerate(preguntas_validas, start=1)

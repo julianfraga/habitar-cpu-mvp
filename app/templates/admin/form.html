@@ -312,7 +312,10 @@
       <label class="block type-body-small weight-medium">Preguntas de la encuesta (máximo 5)</label>
       <div id="preguntas-encuesta-list" class="space-y-2">
         {% for pregunta in preguntas_form %}
-        <input name="preguntas" value="{{ pregunta }}" required placeholder="Pregunta {{ loop.index }}" class="w-full border-width radius-control px-3 py-2">
+        <div class="pregunta-encuesta-item flex gap-2">
+          <input name="preguntas" value="{{ pregunta }}" placeholder="Pregunta" class="w-full border-width radius-control px-3 py-2">
+          <button type="button" class="eliminar-pregunta text-link type-body-small weight-medium" aria-label="Eliminar pregunta">Eliminar</button>
+        </div>
         {% endfor %}
       </div>
       <button id="agregar-pregunta" type="button" class="text-link type-body-small weight-medium">(+) Agregar pregunta</button>
@@ -464,25 +467,40 @@
   function actualizarPreguntasEncuesta() {
     const activa = encuestaObligatoria.value === 'true';
     const preguntas = preguntasLista.querySelectorAll('input[name="preguntas"]');
-    if (activa && preguntas.length === 0) {
-      agregarPregunta.click();
-    }
     preguntasEncuesta.classList.toggle('hidden', !activa);
-    preguntasLista.querySelectorAll('input[name="preguntas"]').forEach((input) => {
-      input.required = activa;
-    });
-    agregarPregunta.hidden = preguntasLista.querySelectorAll('input[name="preguntas"]').length >= 5;
+    agregarPregunta.hidden = preguntas.length >= 5;
+  }
+
+  function agregarCampoPregunta() {
+    const fila = document.createElement('div');
+    fila.className = 'pregunta-encuesta-item flex gap-2';
+
+    const input = document.createElement('input');
+    input.name = 'preguntas';
+    input.placeholder = 'Pregunta';
+    input.className = 'w-full border-width radius-control px-3 py-2';
+
+    const eliminar = document.createElement('button');
+    eliminar.type = 'button';
+    eliminar.className = 'eliminar-pregunta text-link type-body-small weight-medium';
+    eliminar.setAttribute('aria-label', 'Eliminar pregunta');
+    eliminar.textContent = 'Eliminar';
+
+    fila.append(input, eliminar);
+    preguntasLista.appendChild(fila);
   }
 
   agregarPregunta.addEventListener('click', () => {
     const preguntas = preguntasLista.querySelectorAll('input[name="preguntas"]');
     if (preguntas.length >= 5) return;
-    const input = document.createElement('input');
-    input.name = 'preguntas';
-    input.placeholder = `Pregunta ${preguntas.length + 1}`;
-    input.required = encuestaObligatoria.value === 'true';
-    input.className = 'w-full border-width radius-control px-3 py-2';
-    preguntasLista.appendChild(input);
+    agregarCampoPregunta();
+    actualizarPreguntasEncuesta();
+  });
+
+  preguntasLista.addEventListener('click', (event) => {
+    const eliminar = event.target.closest('.eliminar-pregunta');
+    if (!eliminar) return;
+    eliminar.closest('.pregunta-encuesta-item').remove();
     actualizarPreguntasEncuesta();
   });
 
