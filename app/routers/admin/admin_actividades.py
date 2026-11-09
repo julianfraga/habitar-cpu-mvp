@@ -301,6 +301,7 @@ def cancelar(request: Request, actividad_id: int, user: User = Depends(REQUIERE_
             request, "panel",
             query_params={"msg": "No se puede cancelar una actividad terminada"},
         )
+    
 @router.get("/{actividad_id}/export.csv")
 def export_csv(actividad_id: int, user: User = Depends(REQUIERE_ADMIN), db: Session = Depends(get_db)):
     df = services.inscripcion.inscriptos_dataframe(db, actividad_id)

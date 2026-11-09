@@ -309,6 +309,33 @@ def test_finalized_activity_panel_shows_inscriptions_attendance_and_duplicate_ac
     assert "inscripto@example.com" in inscriptos_response.text
 
 
+def test_cancelled_activity_edit_prefills_associated_careers(
+    admin_actividades_client,
+):
+    client, db_session, _docente, carrera = admin_actividades_client
+    fecha_inicio = datetime.now(timezone.utc) + timedelta(days=2)
+    actividad = Actividad(
+        titulo="Actividad cancelada",
+        descripcion="Descripción",
+        tipo="presencial",
+        fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_inicio + timedelta(hours=2),
+        lugar="Campus",
+        cupo_max=30,
+        estado=ESTADO_CANCELADA,
+        carreras_asociadas=[carrera],
+    )
+    db_session.add(actividad)
+    db_session.commit()
+
+    response = client.get(f"/admin/actividades/{actividad.id}/editar")
+
+    assert response.status_code == 200
+    assert f'value="{carrera.id}"' in response.text
+    assert f'data-id="{carrera.id}"' in response.text
+    assert "preselected-carrera" in response.text
+
+
 def test_duplicate_activity_form_copies_settings_but_clears_dates(
     admin_actividades_client,
 ):

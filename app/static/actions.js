@@ -95,6 +95,7 @@
     }
 
     currentMain.replaceWith(nextMain);
+    if (window.initializeCareerSelector) window.initializeCareerSelector();
     document.title = nextDocument.title;
 
     const currentHeader = document.querySelector("body > header");

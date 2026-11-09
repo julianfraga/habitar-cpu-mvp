@@ -1,10 +1,12 @@
-document.addEventListener("DOMContentLoaded", () => {
+function initializeCareerSelector() {
   const select = document.getElementById("carrera-select");
   const tagsContainer = document.getElementById("carreras-tags-container");
   const hiddenInputsContainer = document.getElementById("carreras-hidden-inputs");
   const emptyMsg = document.getElementById("carreras-empty-msg");
 
   if (!select || !tagsContainer || !hiddenInputsContainer) return;
+  if (select.dataset.careerSelectorInitialized === "true") return;
+  select.dataset.careerSelectorInitialized = "true";
 
   const form = select.closest("form");
   const shouldAutoSubmit = form && form.dataset.autoSubmit === "true";
@@ -23,7 +25,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function addTag(value, labelText, isInitializing = false) {
-    if (selectedValues.has(value)) return;
+    if (selectedValues.has(value)) {
+      select.value = "";
+      return;
+    }
 
     if (value === "todas") {
       Array.from(selectedValues).forEach((v) => removeTag(v, isInitializing));
@@ -32,9 +37,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     selectedValues.add(value);
-
-    const optionToHide = select.querySelector(`option[value="${value}"]`);
-    if (optionToHide) optionToHide.hidden = true;
 
     // 1. Crear el elemento visual (Tag)
     const tag = document.createElement("span");
@@ -72,9 +74,6 @@ document.addEventListener("DOMContentLoaded", () => {
   function removeTag(value, isInitializing = false) {
     selectedValues.delete(value);
 
-    const optionToShow = select.querySelector(`option[value="${value}"]`);
-    if (optionToShow) optionToShow.hidden = false;
-
     const tagElem = document.getElementById(`tag-${value}`);
     const inputElem = document.getElementById(`input-${value}`);
 
@@ -111,4 +110,15 @@ document.addEventListener("DOMContentLoaded", () => {
       addTag(id, nombre, true); // true indica que es inicialización
     }
   });
-});
+}
+
+window.initializeCareerSelector = initializeCareerSelector;
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initializeCareerSelector);
+} else {
+  initializeCareerSelector();
+}
+
+const careerSelectorObserver = new MutationObserver(initializeCareerSelector);
+careerSelectorObserver.observe(document.body, { childList: true, subtree: true });
