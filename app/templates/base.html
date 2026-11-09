@@ -28,7 +28,6 @@
         <a href="{{ url_for('faq_list').path }}" class="hover-text-underline">Ayuda</a>
       {% elif user.rol == 'coordinacion' %}
         <a href="{{ url_for('panel').path }}" class="hover-text-underline">Actividades</a>
-        <a href="{{ url_for('inscriptos_index').path }}" class="hover-text-underline">Inscriptos</a>
         <a href="{{ url_for('crear_usuarios').path }}" class="hover-text-underline">Usuarios</a>
         <a href="{{ url_for('admin_mensajes').path }}" class="hover-text-underline">Mensajes</a>
         <a href="{{ url_for('dashboard').path }}" class="hover-text-underline">Analítica</a>

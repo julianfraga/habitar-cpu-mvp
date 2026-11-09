@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.orm import Session
 from starlette.templating import _TemplateResponse
-
+import io
+import pandas as pd
 from app.database import get_db
 from app.models import (
     Asistencia,
@@ -293,4 +294,27 @@ def cancelar(request: Request, actividad_id: int, user: User = Depends(REQUIERE_
     return redirect_to(
         request, "panel",
         query_params={"msg": "Actividad cancelada."},
+    )
+
+@router.get("/{actividad_id}/export.csv")
+def export_csv(actividad_id: int, user: User = Depends(REQUIERE_ADMIN), db: Session = Depends(get_db)):
+    df = services.inscripcion.inscriptos_dataframe(db, actividad_id)
+    csv_bytes = df.to_csv(index=False).encode("utf-8-sig")
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=inscriptos_{actividad_id}.csv"},
+    )
+
+
+@router.get("/{actividad_id}/export.xlsx")
+def export_xlsx(actividad_id: int, user: User = Depends(REQUIERE_ADMIN), db: Session = Depends(get_db)):
+    df = services.inscripcion.inscriptos_dataframe(db, actividad_id)
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Inscriptos")
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=inscriptos_{actividad_id}.xlsx"},
     )
