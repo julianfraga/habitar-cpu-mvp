@@ -15,7 +15,7 @@ from app.models import (
     INSCRIPCION_ALTA,
     Notification,
 )
-from app.services.asistencia import process_closed_enrollment_attendance_emails
+from app.services.asistencia import procesar_mails_actividades_cerradas
 
 logger = logging.getLogger("habitar.scheduler")
 scheduler = BackgroundScheduler(timezone="UTC")
@@ -76,7 +76,7 @@ def send_reminders() -> None:
 def send_attendance_window_details() -> None:
     db = SessionLocal()
     try:
-        sent = process_closed_enrollment_attendance_emails(db)
+        sent = procesar_mails_actividades_cerradas(db)
         if sent:
             logger.info("Sent %d attendance-window emails", sent)
     except Exception as exc:  # noqa: BLE001

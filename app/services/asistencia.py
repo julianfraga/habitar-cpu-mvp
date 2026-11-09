@@ -9,24 +9,28 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import qrcode
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import (
     Actividad,
     Asistencia,
+    Inscripcion,
+    Estudiante,
+    User,
+    VentanaAsistencia,
     ESTADO_CREDITOS_ACREDITADO,
     ESTADO_CREDITOS_PENDIENTE_ENCUESTA,
     ESTADO_PUBLICADA,
-    Estudiante,
+    INSCRIPCION_ALTA,
     ROL_COORDINACION,
     ROL_ESTUDIANTE,
-    User,
-    VentanaAsistencia,
 )
 from app.services.encuestas import estudiante_completo_encuesta
 from app.services.consultas_comunes import is_enrolled
+from app.config import settings
+from app.services.mailing import send_email
 
 class AsistenciaError(Exception):
     pass
@@ -160,32 +164,32 @@ def asegurar_ventana_asistencia(
     '''Asegura que exista una ventana de asistencia para la actividad, creándola si no existe.
     Devuelve la ventana existente o recién creada.
     '''
-    window = (
+    ventana_asistencia = (
         db.query(VentanaAsistencia)
         .filter(VentanaAsistencia.actividad_id == actividad_id)
         .one_or_none()
     )
-    if window is not None:
-        return window
-    window = VentanaAsistencia(
+    if ventana_asistencia is not None:
+        return ventana_asistencia
+    ventana_asistencia = VentanaAsistencia(
         actividad_id=actividad_id,
         codigo=_codigo_asistencia_unico(db),
         codigo_cierre=secrets.token_urlsafe(48),
     )
-    db.add(window)
+    db.add(ventana_asistencia)
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        window = (
+        ventana_asistencia = (
             db.query(VentanaAsistencia)
             .filter(VentanaAsistencia.actividad_id == actividad_id)
             .one_or_none()
         )
-        if window is None:
+        if ventana_asistencia is None:
             raise
-    db.refresh(window)
-    return window
+    db.refresh(ventana_asistencia)
+    return ventana_asistencia
 
 
 def _codigo_asistencia_unico(db: Session) -> str:
@@ -205,17 +209,17 @@ def cerrar_ventana_asistencia(
     now: datetime | None = None,
 ) -> bool:
     '''Cierra manualmente la ventana de asistencia asociada al código de cierre.'''
-    window = (
+    ventana_asistencia = (
         db.query(VentanaAsistencia)
         .filter(VentanaAsistencia.codigo_cierre == close_code)
         .one_or_none()
     )
-    if window is None or window.cerrada_manualmente:
+    if ventana_asistencia is None or ventana_asistencia.cerrada_manualmente:
         return False
-    actividad = db.get(Actividad, window.actividad_id)
+    actividad = db.get(Actividad, ventana_asistencia.actividad_id)
     if actividad is None or not puede_cerrar_ventana_asistencia(actividad, now=now):
         return False
-    window.cerrada_manualmente = True
+    ventana_asistencia.cerrada_manualmente = True
     db.commit()
     return True
 
@@ -237,12 +241,12 @@ def puede_cerrar_ventana_asistencia(
 
 def ventana_asistencia_abierta(
     actividad: Actividad,
-    window: VentanaAsistencia,
+    ventana_asistencia: VentanaAsistencia,
     *,
     now: datetime | None = None,
 ) -> bool:
     '''Indica si la ventana de asistencia está abierta para registrar asistencia (E-09).'''
-    if window.cerrada_manualmente:
+    if ventana_asistencia.cerrada_manualmente:
         return False
     start = actividad.fecha_inicio
     if start.tzinfo is None:
@@ -257,128 +261,174 @@ def ventana_asistencia_abierta(
     )
 
 
-def process_closed_enrollment_attendance_emails(
-    db: Session, *, now: datetime | None = None
+
+def _normalizar_utc(dt: datetime) -> datetime:
+    """Asegura que la fecha tenga zona horaria UTC."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _obtener_actividades_candidatas(db: Session, current_time: datetime) -> list:
+    """Obtiene las actividades publicadas y no finalizadas."""
+    stmt = (
+        select(Actividad)
+        .where(Actividad.estado == ESTADO_PUBLICADA)
+        .where(Actividad.fecha_fin > current_time)
+    )
+    return db.scalars(stmt).all()
+
+
+def _esta_en_ventana_cierre(actividad:Actividad, current_time: datetime) -> bool:
+    """Verifica si la actividad inició hace menos de 24 horas o está por iniciar."""
+    start = _normalizar_utc(actividad.fecha_inicio)
+    return start <= current_time + timedelta(hours=24)
+
+
+def _generar_adjunto_qr(actividad_id: int, codigo: str) -> tuple:
+    """Genera la imagen QR y prepara el archivo adjunto para el correo."""
+    qr_buffer = io.BytesIO()
+    qr_image = qrcode.make(codigo)
+    qr_image.save(qr_buffer, format="PNG")
+    
+    # Debug/Testing 
+    # TODO esto no va en produ
+    qr_dir = Path("./data/qr")
+    qr_dir.mkdir(parents=True, exist_ok=True)
+    qr_image.save(qr_dir / f"asistencia-{actividad_id}.png", format="PNG")
+    
+    return (
+        f"asistencia-{actividad_id}.png",
+        qr_buffer.getvalue(),
+        "image/png",
+    )
+
+
+def _construir_cuerpo_correo(db: Session, actividad:Actividad, ventana_asistencia:VentanaAsistencia) -> str:
+    """Construye el cuerpo del mensaje en formato Markdown con el roster de inscriptos."""
+    inscriptos = (
+        db.query(Inscripcion)
+        .filter(
+            Inscripcion.actividad_id == actividad.id,
+            Inscripcion.estado == INSCRIPCION_ALTA,
+        )
+        .all()
+    )
+    
+    roster = []
+    for inscripto in inscriptos:
+        estudiante = inscripto.user
+        carrera = estudiante.carrera
+        carrera_name = (
+            f"{carrera.tipo.nombre} {carrera.nombre}" if carrera else "Sin carrera"
+        )
+        roster.append(
+            f"| {estudiante.nombre} | {estudiante.apellido} | {estudiante.email} | {carrera_name} |"
+        )
+
+    close_url = f"{settings.PUBLIC_BASE_URL}/docente/asistencia/cerrar/{ventana_asistencia.codigo_cierre}"
+    
+    tabla_inscriptos = (
+        "| Nombre | Apellido | Mail | Carrera |\n"
+        "| --- | --- | --- | --- |\n"
+        + "\n".join(roster)
+        if roster
+        else "- No hay inscriptos."
+    )
+
+    return (
+        f"Inscripción cerrada para '{actividad.titulo}'.\n\n"
+        f"Inicio: {actividad.fecha_inicio.strftime('%d/%m/%Y %H:%M')}\n"
+        f"Código de validación: {ventana_asistencia.codigo}\n"
+        f"Ventana de asistencia: desde 30 minutos antes del inicio hasta 6 horas después del inicio.\n"
+        f"Cierre manual: {close_url}\n\n"
+        f"Inscriptos:\n{tabla_inscriptos}"
+    )
+
+
+def _enviar_correos_docentes(
+    db: Session,
+    ventana_asistencia,
+    docentes: dict,
+    notified_emails: set,
+    titulo_actividad: str,
+    body: str,
+    attachment: tuple
 ) -> int:
-    from app.config import settings
-    from app.models import ESTADO_PUBLICADA, INSCRIPCION_ALTA, Inscripcion
-    from app.services.mailing import send_email
-    '''Envía correos a los docentes de actividades cuya inscripción se cerró en las últimas 24h, con el listado de inscriptos y el código de asistencia. Devuelve la cantidad de correos enviados.'''
-    current = now or _now()
-    if current.tzinfo is None:
-        current = current.replace(tzinfo=timezone.utc)
-    else:
-        current = current.astimezone(timezone.utc)
-    activities = db.query(Actividad).filter(
-        Actividad.estado == ESTADO_PUBLICADA
-    ).all()
+    """Itera sobre los docentes y envía los correos pendientes, actualizando la base de datos."""
     delivered = 0
-    for activity in activities:
-        start = activity.fecha_inicio
-        if start.tzinfo is None:
-            start = start.replace(tzinfo=timezone.utc)
-        if start > current + timedelta(hours=24):
+    for email in docentes:
+        if email in notified_emails:
             continue
-        window = asegurar_ventana_asistencia(db, activity.id)
-        notified_emails = set(json.loads(window.correos_enviados))
-        teachers = {
-            teacher_user.email: teacher_user
-            for docente in activity.docentes
-            for teacher_user in docente.usuarios
-            if teacher_user.email
-        }
-        if not teachers:
-            continue
-        if set(teachers).issubset(notified_emails):
-            continue
-        enrollments = (
-            db.query(Inscripcion)
-            .filter(
-                Inscripcion.actividad_id == activity.id,
-                Inscripcion.estado == INSCRIPCION_ALTA,
-            )
-            .all()
-        )
-        roster = []
-        for enrollment in enrollments:
-            student = enrollment.user
-            career = student.carrera
-            career_name = (
-                f"{career.tipo.nombre} {career.nombre}" if career else "Sin carrera"
-            )
-            roster.append(
-                f"| {student.nombre} | {student.apellido} | {student.email} | {career_name} |"
-            )
-        close_url = (
-            f"{settings.PUBLIC_BASE_URL}/docente/asistencia/cerrar/"
-            f"{window.codigo_cierre}"
-        )
-        body = (
-            f"Inscripción cerrada para '{activity.titulo}'.\n\n"
-            f"Inicio: {activity.fecha_inicio.strftime('%d/%m/%Y %H:%M')}\n"
-            f"Código de validación: {window.codigo}\n"
-            f"Ventana de asistencia: desde 30 minutos antes del inicio hasta "
-            "6 horas después del inicio.\n"
-            f"Cierre manual: {close_url}\n\n"
-            "Inscriptos:\n"
-            + (
-                "| Nombre | Apellido | Mail | Carrera |\n"
-                "| --- | --- | --- | --- |\n"
-                + "\n".join(roster)
-                if roster
-                else "- No hay inscriptos."
-            )
-        )
-        qr_buffer = io.BytesIO()
-        qrcode.make(window.codigo).save(qr_buffer, format="PNG")
-        #TODO: esto no va en producción, es solo para debug y testing. En producción se debería generar el QR en el front-end.
-        qr_image = qrcode.make(window.codigo)
-        qr_image.save(qr_buffer, format="PNG")
-        qr_dir = Path("./data/qr")
-        qr_dir.mkdir(parents=True, exist_ok=True)
-        qr_image.save(qr_dir / f"asistencia-{activity.id}.png", format="PNG")
-        ###
-        attachment = (
-            f"asistencia-{activity.id}.png",
-            qr_buffer.getvalue(),
-            "image/png",
-        )
-        for email in teachers:
-            if email in notified_emails:
-                continue
-            if send_email(
-                email,
-                f"Inscripción cerrada: {activity.titulo}",
-                body,
-                attachments=[attachment],
-            ):
-                notified_emails.add(email)
-                window.correos_enviados = json.dumps(sorted(notified_emails))
-                db.commit()
-                delivered += 1
+        if send_email(
+            email,
+            f"Inscripción cerrada: {titulo_actividad}",
+            body,
+            attachments=[attachment],
+        ):
+            notified_emails.add(email)
+            ventana_asistencia.correos_enviados = json.dumps(sorted(notified_emails))
+            db.commit()
+            delivered += 1
     return delivered
 
+def procesar_mails_actividades_cerradas(
+    db: Session, *, now: datetime | None = None
+) -> int:
+    """Envía correos a los docentes de actividades cuya inscripción se cerró en las últimas 24h,
+
+    con el listado de inscriptos y el código de asistencia. Devuelve la cantidad de correos enviados.
+    """
+    current_time = _normalizar_utc(now or _now())
+    actividades = _obtener_actividades_candidatas(db, current_time)
+    
+    delivered = 0
+    for actividad in actividades:
+        if not _esta_en_ventana_cierre(actividad, current_time):
+            continue
+            
+        ventana_asistencia = asegurar_ventana_asistencia(db, actividad.id)
+        notified_emails = set(json.loads(ventana_asistencia.correos_enviados))
+        
+        docentes = {d.email: d.nombre_completo for d in actividad.docentes}
+        if not docentes or set(docentes).issubset(notified_emails):
+            continue
+            
+        attachment = _generar_adjunto_qr(actividad.id, ventana_asistencia.codigo)
+        body = _construir_cuerpo_correo(db, actividad, ventana_asistencia)
+        
+        delivered += _enviar_correos_docentes(
+            db=db,
+            ventana_asistencia=ventana_asistencia,
+            docentes=docentes,
+            notified_emails=notified_emails,
+            titulo_actividad=actividad.titulo,
+            body=body,
+            attachment=attachment
+        )
+        
+    return delivered
 
 def check_in(db: Session, token: str, user_id: int) -> Actividad:
-    """Validate a scanned token and mark the student present. Raises AsistenciaError."""
+    """Validate a scanned token and mark the estudiante present. Raises AsistenciaError."""
     token = token.strip()
-    window = (
+    ventana_asistencia = (
         db.query(VentanaAsistencia)
         .filter(VentanaAsistencia.codigo == token)
         .one_or_none()
     )
-    if window is None:
+    if ventana_asistencia is None:
         raise AsistenciaError("Código inválido.")
-    actividad = db.get(Actividad, window.actividad_id)
-    if actividad is None or not ventana_asistencia_abierta(actividad, window):
+    actividad = db.get(Actividad, ventana_asistencia.actividad_id)
+    if actividad is None or not ventana_asistencia_abierta(actividad, ventana_asistencia):
         raise AsistenciaError("La actividad no está abierta para registrar asistencia.")
-    if not is_enrolled(db, window.actividad_id, user_id):
+    if not is_enrolled(db, ventana_asistencia.actividad_id, user_id):
         raise AsistenciaError("No estás inscripto en esta actividad.")
 
     already = (
         db.query(Asistencia)
         .filter(
-            Asistencia.actividad_id == window.actividad_id,
+            Asistencia.actividad_id == ventana_asistencia.actividad_id,
             Asistencia.user_id == user_id,
         )
         .first()
@@ -388,7 +438,7 @@ def check_in(db: Session, token: str, user_id: int) -> Actividad:
 
     db.add(
         Asistencia(
-            actividad_id=window.actividad_id,
+            actividad_id=ventana_asistencia.actividad_id,
             user_id=user_id,
             validated_by=None,
             estado_creditos=ESTADO_CREDITOS_PENDIENTE_ENCUESTA,
@@ -396,7 +446,7 @@ def check_in(db: Session, token: str, user_id: int) -> Actividad:
     )
     try:
         db.flush()
-        _acreditar_creditos(db, window.actividad_id, user_id, actividad.creditos)
+        _acreditar_creditos(db, ventana_asistencia.actividad_id, user_id, actividad.creditos)
         db.commit()
     except IntegrityError:
         # Concurrent double-scan: the unique constraint already recorded it.
@@ -414,7 +464,7 @@ def mark_present_manual(
 ) -> bool:
     """Admin/docente manual override (E-09 supervision).
 
-    Mirrors the guards in check_in(): the target must be a real student enrolled
+    Mirrors the guards in check_in(): the target must be a real estudiante enrolled
     in the actividad, so asistencia/credits cannot be fabricated for arbitrary ids.
     """
     target = db.get(User, user_id)
@@ -454,7 +504,7 @@ def mark_present_manual(
 
 
 def revoke_present(db: Session, actividad_id: int, user_id: int) -> bool:
-    """Remove a student's attendance and reverse credits already awarded for it."""
+    """Remove a estudiante's attendance and reverse credits already awarded for it."""
     attendance = (
         db.query(Asistencia)
         .filter(
