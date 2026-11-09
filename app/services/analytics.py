@@ -2,16 +2,19 @@
 from __future__ import annotations
 
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models import (
     Actividad,
     Asistencia,
     ESTADO_PUBLICADA,
+    Estudiante,
     Inscripcion,
     INSCRIPCION_ALTA,
     RespuestaEncuesta,
+    User,
 )
+from app.services.parsing import formatear_duracion
 
 
 def overview(db: Session) -> dict:
@@ -85,3 +88,36 @@ def survey_averages(db: Session) -> list[dict]:
         {"titulo": r[0], "promedio": round(float(r[1]), 2), "respuestas": int(r[2])}
         for r in rows
     ]
+
+
+def actividad_detalle(db: Session, actividad: Actividad) -> dict:
+    inscriptos = (
+        db.query(Inscripcion)
+        .filter(
+            Inscripcion.actividad_id == actividad.id,
+            Inscripcion.estado == INSCRIPCION_ALTA,
+        )
+        .count()
+    )
+    asistencias = (
+        db.query(Asistencia)
+        .filter(Asistencia.actividad_id == actividad.id)
+        .count()
+    )
+    respuestas = (
+        db.query(RespuestaEncuesta)
+        .options(
+            joinedload(RespuestaEncuesta.estudiante)
+            .joinedload(Estudiante.user)
+            .joinedload(User.persona)
+        )
+        .filter(RespuestaEncuesta.actividad_id == actividad.id)
+        .order_by(RespuestaEncuesta.id)
+        .all()
+    )
+    return {
+        "inscriptos": inscriptos,
+        "asistencias": asistencias,
+        "duracion": formatear_duracion(actividad.fecha_inicio, actividad.fecha_fin),
+        "respuestas": respuestas,
+    }

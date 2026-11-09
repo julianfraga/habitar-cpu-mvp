@@ -244,6 +244,78 @@ def test_panel_shows_single_badge_when_activity_includes_all_careers(
     assert "Todas las carreras" not in partial_row
 
 
+def test_finalized_activity_panel_shows_inscriptions_attendance_and_duplicate_action(
+    admin_actividades_client,
+):
+    client, db_session, _docente, carrera = admin_actividades_client
+    fecha_inicio = datetime.now(timezone.utc) - timedelta(hours=4)
+    actividad = Actividad(
+        titulo="Actividad finalizada",
+        descripcion="Descripción",
+        tipo="presencial",
+        fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_inicio + timedelta(hours=2),
+        lugar="Campus",
+        cupo_max=30,
+        estado=ESTADO_PUBLICADA,
+        carreras_asociadas=[carrera],
+    )
+    db_session.add(actividad)
+    db_session.commit()
+
+    response = client.get("/admin/actividades")
+
+    assert response.status_code == 200
+    row = response.text.split("Actividad finalizada", 1)[1].split("</tr>", 1)[0]
+    assert "Inscriptos" in row
+    assert "Asistencia" in row
+    assert "Ver encuestas" in row
+    assert f"/admin/analytics/actividad_{actividad.id}" in row
+    assert "Publicar otra igual" in row
+    assert "Vista previa" not in row
+    assert "Editar" not in row
+    assert "Cancelar" not in row
+    assert f"copiar_de={actividad.id}" in row
+
+
+def test_duplicate_activity_form_copies_settings_but_clears_dates(
+    admin_actividades_client,
+):
+    client, db_session, _docente, carrera = admin_actividades_client
+    fecha_inicio = datetime.now(timezone.utc) - timedelta(hours=4)
+    actividad = Actividad(
+        titulo="Actividad para repetir",
+        descripcion="Descripción copiada",
+        tipo="presencial",
+        fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_inicio + timedelta(hours=2),
+        lugar="Campus",
+        cupo_max=24,
+        creditos=2.5,
+        estado=ESTADO_PUBLICADA,
+        encuesta_obligatoria=True,
+        preguntas={"q1": "¿Qué te pareció?"},
+        carreras_asociadas=[carrera],
+    )
+    db_session.add(actividad)
+    db_session.commit()
+
+    response = client.get(
+        f"/admin/actividades/nueva?copiar_de={actividad.id}"
+    )
+
+    assert response.status_code == 200
+    assert "Datos copiados de «Actividad para repetir»" in response.text
+    assert 'name="titulo"' in response.text
+    assert 'value="Actividad para repetir"' in response.text
+    assert 'name="descripcion"' in response.text
+    assert "Descripción copiada" in response.text
+    assert 'name="duracion"' in response.text
+    assert 'value="02:00"' in response.text
+    inicio = response.text.split('id="fecha_inicio"', 1)[1].split(">", 1)[0]
+    assert 'value=""' in inicio
+
+
 def test_create_activity_rejects_credits_not_in_half_point_steps(admin_actividades_client):
     client, db_session, docente, carrera = admin_actividades_client
     data = actividad_form_data(docente.docente_id, carrera.id)

@@ -79,13 +79,37 @@ def panel(
 
 
 @router.get("/nueva")
-def nueva(request: Request, user: User = Depends(REQUIERE_ADMIN), db: Session = Depends(get_db)):
+def nueva(
+    request: Request,
+    copiar_de: int | None = Query(None),
+    user: User = Depends(REQUIERE_ADMIN),
+    db: Session = Depends(get_db),
+):
+    form_data = {}
+    copiada_de = None
+    duracion_inicial = "01:00"
+    if copiar_de is not None:
+        copiada_de = services.actividades.get(db, copiar_de)
+        if copiada_de is None:
+            return redirect_to(
+                request,
+                "panel",
+                query_params={"err": "Actividad para duplicar no encontrada."},
+            )
+        form_data = services.actividades.actividad_edit_form_data(copiada_de)
+        form_data["fecha_inicio"] = ""
+        form_data["fecha_fin"] = ""
+        form_data["modo_finalizacion"] = "duracion"
+        duracion_inicial = str(form_data["duracion"])
+
     return render(
         request, "admin/form.html", user=user, db=db,
         a=None, docentes=get_docentes(db), tipos=[TIPO_PRESENCIAL, TIPO_VIRTUAL],
         lista_carreras=services.carreras.get_carreras(db),
-        duracion_inicial="01:00",
+        duracion_inicial=duracion_inicial,
         fecha_hoy=date.today().isoformat(),
+        form_data=form_data,
+        copiada_de=copiada_de,
     )
 
 

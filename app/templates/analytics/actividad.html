@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ a.titulo }} - Analítica{% endblock %}
+{% block content %}
+<a href="{{ url_for('dashboard').path }}" class="type-body-small text-link hover-text-underline inline-flex items-center gap-1">
+  <i data-lucide="arrow-left" class="w-4 h-4"></i> Analítica
+</a>
+
+<div class="mt-2 mb-5">
+  <h1 class="type-heading weight-bold">{{ a.titulo }}</h1>
+  <p class="text-muted type-body-small">
+    {{ a.fecha_inicio|fmt_dt }} al {{ a.fecha_fin|fmt_dt }}
+    <span class="mx-1">·</span> Duración (hh:mm): {{ duracion }}
+  </p>
+</div>
+
+<div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
+  <div class="surface-card radius-panel elevation-card p-4">
+    <p class="type-caption text-subtle">Inscriptos</p>
+    <p class="type-heading weight-bold text-link">{{ inscriptos }}</p>
+  </div>
+  <div class="surface-card radius-panel elevation-card p-4">
+    <p class="type-caption text-subtle">Asistencias</p>
+    <p class="type-heading weight-bold text-success">{{ asistencias }}</p>
+  </div>
+  <div class="surface-card radius-panel elevation-card p-4">
+    <p class="type-caption text-subtle">Respuestas de encuesta</p>
+    <p class="type-heading weight-bold">{{ respuestas|length }}</p>
+  </div>
+</div>
+
+<section class="surface-card radius-card elevation-card p-5">
+  <h2 class="weight-semibold mb-3">Respuestas de encuestas</h2>
+  <div class="overflow-x-auto">
+    <table class="w-full type-body-small min-width-table">
+      <thead class="surface-muted text-muted text-align-left">
+        <tr>
+          <th class="px-4 py-3">Estudiante</th>
+          <th class="px-4 py-3">Valoración</th>
+          <th class="px-4 py-3">Respuestas de encuesta</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for respuesta in respuestas %}
+        <tr class="border-top">
+          <td class="px-4 py-3 weight-medium">
+            {{ respuesta.estudiante.nombre_completo }}
+            <span class="text-muted">({{ respuesta.estudiante.email or "Sin email" }})</span>
+          </td>
+          <td class="px-4 py-3">
+            <span class="inline-flex items-center gap-1">
+              <i data-lucide="star" class="w-4 h-4 icon-baseline-align text-rating icon-rating"></i>
+              {{ respuesta.rating }}/5
+            </span>
+          </td>
+          <td class="px-4 py-3">
+            {% if respuesta.respuestas %}
+              <ul class="space-y-1">
+              {% for clave, valor in respuesta.respuestas.items() %}
+                <li><span class="weight-medium">{{ a.preguntas.get(clave, clave) }}:</span> {{ valor }}</li>
+              {% endfor %}
+              </ul>
+            {% else %}
+              <span class="text-muted">Sin respuestas de texto.</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr>
+          <td colspan="3" class="px-4 py-6 text-align-center text-muted">
+            Todavía no hay respuestas de encuestas.
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

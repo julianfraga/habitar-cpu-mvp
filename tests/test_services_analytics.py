@@ -2,9 +2,11 @@ from app.models import (
     Asistencia,
     ESTADO_PUBLICADA,
     Inscripcion,
+    INSCRIPCION_BAJA,
     RespuestaEncuesta,
 )
 from app.services.analytics import (
+    actividad_detalle,
     asistencia_per_actividad,
     overview,
     survey_averages,
@@ -104,3 +106,39 @@ def test_survey_averages_ordena_y_redondea(db_session, actividad_factory, user_f
         {"titulo": "Mejor", "promedio": 4.5, "respuestas": 2},
         {"titulo": "Otra", "promedio": 3.0, "respuestas": 1},
     ]
+
+
+def test_actividad_detalle_reune_conteos_duracion_y_respuestas(
+    db_session, actividad_factory, user_factory
+):
+    actividad = actividad_factory(titulo="Taller")
+    estudiante = user_factory(email="estudiante@example.com")
+    otro = user_factory()
+    db_session.add_all(
+        [
+            Inscripcion(actividad_id=actividad.id, user_id=estudiante.id),
+            Inscripcion(
+                actividad_id=actividad.id,
+                user_id=otro.id,
+                estado=INSCRIPCION_BAJA,
+            ),
+            Asistencia(actividad_id=actividad.id, user_id=estudiante.id),
+            RespuestaEncuesta(
+                actividad_id=actividad.id,
+                estudiante_id=estudiante.id,
+                respuestas={"q1": "Muy buena"},
+                rating=5,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    detalle = actividad_detalle(db_session, actividad)
+
+    assert detalle["inscriptos"] == 1
+    assert detalle["asistencias"] == 1
+    assert detalle["duracion"] == "02:00"
+    assert len(detalle["respuestas"]) == 1
+    respuesta = detalle["respuestas"][0]
+    assert respuesta.estudiante.nombre_completo == "Nombre 1 Prueba"
+    assert respuesta.estudiante.email == "estudiante@example.com"

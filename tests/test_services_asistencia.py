@@ -95,10 +95,10 @@ def test_enrollment_closure_emails_roster_qr_code_and_close_link(
 
     monkeypatch.setattr(mailing, "send_email", record_email)
     now = datetime.now(timezone.utc)
-    count = asistencia.process_closed_enrollment_attendance_emails(
+    count = asistencia.procesar_mails_actividades_cerradas(
         db_session, now=now
     )
-    second_count = asistencia.process_closed_enrollment_attendance_emails(
+    second_count = asistencia.procesar_mails_actividades_cerradas(
         db_session, now=now
     )
 

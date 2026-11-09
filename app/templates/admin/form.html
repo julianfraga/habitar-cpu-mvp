@@ -12,6 +12,12 @@
     {{ 'Editar actividad' if a else 'Nueva actividad' }}
   </h1>
 
+  {% if copiada_de %}
+    <p class="mb-5 type-body-small text-muted">
+      Datos copiados de «{{ copiada_de.titulo }}». Elegí una nueva fecha de inicio para publicar esta actividad.
+    </p>
+  {% endif %}
+
   {% if error %}
     <div role="alert" class="mb-5 p-4 radius-panel surface-danger-soft border-width border-danger text-danger-contrast type-body-small">
       {{ error }}

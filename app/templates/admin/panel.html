@@ -121,20 +121,27 @@
         <td class="text-muted text-no-wrap">{{ r.cupo.taken }}/{{ r.a.cupo_max }}</td>
         <td class="px-4 py-3">
           <div class="flex gap-2 justify-end flex-wrap type-caption">
-            <a href="{{ url_for('preview', actividad_id=r.a.id).path }}" class="text-secondary hover-text-underline">Vista previa</a>
-            <a href="{{ url_for('editar', actividad_id=r.a.id).path }}" class="text-link hover-text-underline">Editar</a>
-            <a href="{{ url_for('inscriptos_detail', actividad_id=r.a.id).path }}" class="text-link hover-text-underline">Inscriptos</a>
-            <a href="{{ url_for('admin_asistencia', actividad_id=r.a.id).path }}" class="text-link hover-text-underline">Asistencia</a>
-            {% if r.a.estado != 'publicada' %}
-              {% if r.a.carreras_asociadas %}
-                <form method="post" action="{{ url_for('publicar', actividad_id=r.a.id).path }}"><button class="text-success hover-text-underline">Publicar</button></form>
-              {% else %}
-                <span class="inline-flex" data-tooltip="No se puede publicar una actividad sin carreras asociadas.">
-                  <button type="button" disabled class="text-subtle cursor-disabled">Publicar</button>
-                </span>
-              {% endif %}
+            {% if r.a.estado == 'publicada' and r.a.finalizada %}
+              <a href="{{ url_for('inscriptos_detail', actividad_id=r.a.id).path }}" class="text-link hover-text-underline">Inscriptos</a>
+              <a href="{{ url_for('admin_asistencia', actividad_id=r.a.id).path }}" class="text-link hover-text-underline">Asistencia</a>
+              <a href="{{ url_for('detalle', actividad_id=r.a.id).path }}" class="text-link hover-text-underline">Ver encuestas</a>
+              <a href="{{ url_for('nueva').include_query_params(copiar_de=r.a.id) }}" class="text-success hover-text-underline">Publicar otra igual</a>
             {% else %}
-              <form method="post" action="{{ url_for('cancelar', actividad_id=r.a.id).path }}" onsubmit="return confirm('¿Cancelar esta actividad?')"><button class="text-danger hover-text-underline">Cancelar</button></form>
+              <a href="{{ url_for('preview', actividad_id=r.a.id).path }}" class="text-secondary hover-text-underline">Vista previa</a>
+              <a href="{{ url_for('editar', actividad_id=r.a.id).path }}" class="text-link hover-text-underline">Editar</a>
+              <a href="{{ url_for('inscriptos_detail', actividad_id=r.a.id).path }}" class="text-link hover-text-underline">Inscriptos</a>
+              <a href="{{ url_for('admin_asistencia', actividad_id=r.a.id).path }}" class="text-link hover-text-underline">Asistencia</a>
+              {% if r.a.estado != 'publicada' %}
+                {% if r.a.carreras_asociadas %}
+                  <form method="post" action="{{ url_for('publicar', actividad_id=r.a.id).path }}"><button class="text-success hover-text-underline">Publicar</button></form>
+                {% else %}
+                  <span class="inline-flex" data-tooltip="No se puede publicar una actividad sin carreras asociadas.">
+                    <button type="button" disabled class="text-subtle cursor-disabled">Publicar</button>
+                  </span>
+                {% endif %}
+              {% else %}
+                <form method="post" action="{{ url_for('cancelar', actividad_id=r.a.id).path }}" onsubmit="return confirm('¿Cancelar esta actividad?')"><button class="text-danger hover-text-underline">Cancelar</button></form>
+              {% endif %}
             {% endif %}
           </div>
         </td>
