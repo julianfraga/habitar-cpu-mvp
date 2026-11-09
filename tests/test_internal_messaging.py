@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from fastapi.testclient import TestClient
-from urllib.parse import unquote_plus
+from urllib.parse import parse_qs, urlsplit
 
 from app.database import get_db
 from app.main import app
@@ -15,6 +15,14 @@ def _client(db_session):
 
     app.dependency_overrides[get_db] = override_get_db
     return TestClient(app, follow_redirects=False)
+
+
+def _assert_flash_redirect(client, response, message):
+    location = urlsplit(response.headers["location"])
+    query = parse_qs(location.query)
+    assert "msg" not in query and "err" not in query
+    page = client.get(response.headers["location"])
+    assert message in page.text
 
 
 def test_coordinator_can_send_broadcast_and_students_read_independently(
@@ -52,7 +60,7 @@ def test_coordinator_can_send_broadcast_and_students_read_independently(
             },
         )
         assert sent.status_code == 303
-        assert "todos los estudiantes" in unquote_plus(sent.headers["location"])
+        _assert_flash_redirect(client, sent, "todos los estudiantes")
         message = db_session.query(Mensaje).one()
         assert message.destinatario_id is None
     finally:
@@ -145,7 +153,7 @@ def test_admin_recipient_picker_delivers_to_selected_users_careers_and_activitie
             },
         )
         assert sent.status_code == 303
-        assert "3 estudiante(s) seleccionados" in unquote_plus(sent.headers["location"])
+        _assert_flash_redirect(client, sent, "3 estudiante(s) seleccionados")
         messages = db_session.query(Mensaje).filter(
             Mensaje.asunto == "Aviso segmentado"
         ).all()
@@ -244,8 +252,13 @@ def test_coordinator_can_reply_from_inbox_and_student_receives_reply(
             },
         )
         assert response.status_code == 303
-        assert response.headers["location"].startswith("/notificaciones?")
-        assert "tab=mensajes" in response.headers["location"]
+        location = urlsplit(response.headers["location"])
+        query = parse_qs(location.query)
+        assert location.path == "/notificaciones"
+        assert query["tab"] == ["mensajes"]
+        assert "msg" not in query and "err" not in query
+        response_page = coordinator_client.get(response.headers["location"])
+        assert "Respuesta enviada al estudiante." in response_page.text
         db_session.refresh(inquiry)
         assert inquiry.leido is True
         reply = db_session.query(Mensaje).filter(Mensaje.reply_to_id == inquiry.id).one()

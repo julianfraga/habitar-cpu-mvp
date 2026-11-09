@@ -1,4 +1,4 @@
-from urllib.parse import unquote_plus
+from urllib.parse import parse_qs, urlsplit
 
 from fastapi.testclient import TestClient
 
@@ -300,7 +300,11 @@ def test_faq_contact_requires_search_and_coordinator_recipient(
             },
         )
         assert response.status_code == 303
-        assert "No hay cuentas de coordinación" in unquote_plus(response.headers["location"])
+        location = urlsplit(response.headers["location"])
+        query = parse_qs(location.query)
+        assert "msg" not in query and "err" not in query
+        result_page = client.get(response.headers["location"])
+        assert "No hay cuentas de coordinación" in result_page.text
         assert db_session.query(Mensaje).count() == 0
     finally:
         client.close()

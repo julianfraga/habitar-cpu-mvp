@@ -60,9 +60,9 @@
 
 {% block scripts %}
 <script>
-  function confirmarRevocacion(form) {
+  window.confirmarRevocacion = function (form) {
     if (!window.confirm('¿Seguro que querés revocar la asistencia?')) return false;
     return window.confirm('Confirmación final: se quitará la asistencia y, si corresponde, los créditos acreditados.');
-  }
+  };
 </script>
 {% endblock %}

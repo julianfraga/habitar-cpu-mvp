@@ -87,13 +87,15 @@ def test_closed_enrollment_disables_registration_and_shows_badge(
             detail = client.get(f"/actividades/{activity.id}")
             listing = client.get("/actividades")
             enroll = client.post(f"/actividades/{activity.id}/inscribir")
+            error_page = client.get(enroll.headers["location"])
     finally:
         app.dependency_overrides.pop(get_db, None)
 
     assert '<button type="button" disabled' in detail.text
     assert enroll.status_code == 303
-    error = parse_qs(urlsplit(enroll.headers["location"]).query)["err"][0]
-    assert "inscripción a esta actividad ya está cerrada" in error
+    query = parse_qs(urlsplit(enroll.headers["location"]).query)
+    assert "msg" not in query and "err" not in query
+    assert "inscripción a esta actividad ya está cerrada" in error_page.text
 
 
 def test_finalized_activity_shows_badge_and_cannot_be_unenrolled(
@@ -134,6 +136,7 @@ def test_finalized_activity_shows_badge_and_cannot_be_unenrolled(
             detail = client.get(f"/actividades/{activity.id}")
             listing = client.get("/actividades")
             unenroll = client.post(f"/actividades/{activity.id}/baja")
+            error_page = client.get(unenroll.headers["location"])
     finally:
         app.dependency_overrides.pop(get_db, None)
 
@@ -142,8 +145,9 @@ def test_finalized_activity_shows_badge_and_cannot_be_unenrolled(
     assert "/baja" not in detail.text
     assert "finalizada" in listing.text.lower()
     assert unenroll.status_code == 303
-    error = parse_qs(urlsplit(unenroll.headers["location"]).query)["err"][0]
-    assert "actividad ya finalizada" in error
+    query = parse_qs(urlsplit(unenroll.headers["location"]).query)
+    assert "msg" not in query and "err" not in query
+    assert "actividad ya finalizada" in error_page.text
 
 
 def test_inscription_confirmation_shows_cancellation_policy_below_banner(

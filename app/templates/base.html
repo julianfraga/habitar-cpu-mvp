@@ -48,27 +48,25 @@
   </header>
   {% endif %}
 
+  <div
+    id="toast-region"
+    class="fixed top-4 right-4 z-50 flex flex-col gap-3 p-4 pointer-events-none"
+    aria-live="polite"
+    aria-atomic="false"
+  >
+    {% for alert in alerts %}
+      <div
+        data-toast
+        role="{{ 'alert' if alert.level == 'error' else 'status' }}"
+        class="pointer-events-auto flex items-start gap-3 radius-panel elevation-floating border-width px-4 py-3 type-body-small {{ 'surface-danger-soft border-danger text-danger-contrast' if alert.level == 'error' else 'surface-info border-info text-info' if alert.level == 'info' else 'surface-success-soft border-success text-success-contrast' }}"
+      >
+        <span>{{ alert.message }}</span>
+        <button type="button" data-toast-dismiss aria-label="Cerrar notificación" class="ml-auto weight-bold">×</button>
+      </div>
+    {% endfor %}
+  </div>
+
   <main class="max-w-5xl mx-auto px-4 py-6 w-full flex-1">
-    {% set msg = request.query_params.get('msg') %}
-    {% set err = request.query_params.get('err') %}
-    {% if msg %}
-      <div class="mb-6 p-4 radius-panel surface-success-soft border-width border-success text-success-contrast type-body-small flex items-center gap-2">
-        <i data-lucide="check-circle" class="w-5 h-5 text-success shrink-0"></i>
-        <span>{{ msg }}</span>
-      </div>
-    {% endif %}
-    {% set notice = request.query_params.get('notice') %}
-    {% if notice %}
-      <div role="status" class="mb-6 p-4 radius-panel surface-info border-width border-info text-info type-body-small">
-        {{ notice }}
-      </div>
-    {% endif %}
-    {% if err %}
-      <div class="mb-6 p-4 radius-panel surface-danger-soft border-width border-danger text-danger-contrast type-body-small flex items-center gap-2">
-        <i data-lucide="alert-circle" class="w-5 h-5 text-danger shrink-0"></i>
-        <span>{{ err }}</span>
-      </div>
-    {% endif %}
     {% block content %}{% endblock %}
   </main>
 
@@ -77,22 +75,8 @@
   </footer>
   <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
   <script src="{{ url_for('static', path='/selector_carreras.js').path }}"></script>
-  <script>
-    (() => {
-      const navToggle = document.getElementById("nav-toggle");
-      const siteNavigation = document.getElementById("site-navigation");
-      if (!navToggle || !siteNavigation) return;
-
-      navToggle.addEventListener("click", () => {
-        const isExpanded = navToggle.getAttribute("aria-expanded") === "true";
-        navToggle.setAttribute("aria-expanded", String(!isExpanded));
-        navToggle.setAttribute("aria-label", isExpanded ? "Abrir menú" : "Cerrar menú");
-        siteNavigation.classList.toggle("hidden", isExpanded);
-        siteNavigation.classList.toggle("flex", !isExpanded);
-      });
-    })();
-  </script>
-  {% block scripts %}{% endblock %}
+  <script src="{{ url_for('static', path='/actions.js').path }}"></script>
+  <div id="page-scripts">{% block scripts %}{% endblock %}</div>
   <script>if (window.lucide) lucide.createIcons();</script>
 </body>
 </html>

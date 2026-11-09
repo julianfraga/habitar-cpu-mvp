@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import re
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -16,6 +17,8 @@ from app.models import (
     ESTADO_CREDITOS_PENDIENTE_ENCUESTA,
     ESTADO_PUBLICADA,
     Actividad,
+    Inscripcion,
+    INSCRIPCION_ALTA,
     Persona,
     User,
 )
@@ -71,8 +74,20 @@ def actividad_form_data(docente_id, carrera_id, *, titulo="Actividad nueva"):
     }
 
 
-def redirect_query(response, name):
-    return parse_qs(urlsplit(response.headers["location"]).query).get(name, [""])[0]
+def assert_flash_redirect(client, response, expected_message):
+    location = urlsplit(response.headers["location"])
+    query = parse_qs(location.query)
+    assert "msg" not in query
+    assert "err" not in query
+    assert "notice" not in query
+    page = client.get(response.headers["location"])
+    assert expected_message in page.text
+    return page
+
+
+def table_row(response, activity_title):
+    rows = re.findall(r"<tr\b.*?</tr>", response.text, flags=re.DOTALL)
+    return next(row for row in rows if activity_title in row)
 
 
 def testparse_duracion_accepts_hh_mm():
@@ -206,12 +221,12 @@ def test_admin_activities_crud_lifecycle(admin_actividades_client):
 
     publish_response = client.post(f"/admin/actividades/{actividad.id}/publicar")
     assert publish_response.status_code == 303
-    assert redirect_query(publish_response, "msg").startswith("Actividad publicada")
+    assert_flash_redirect(client, publish_response, "Actividad publicada")
     db_session.refresh(actividad)
     assert actividad.estado == ESTADO_PUBLICADA
     cancel_response = client.post(f"/admin/actividades/{actividad.id}/cancelar")
     assert cancel_response.status_code == 303
-    assert redirect_query(cancel_response, "msg").startswith("Actividad cancelada")
+    assert_flash_redirect(client, cancel_response, "Actividad cancelada")
     db_session.refresh(actividad)
     assert actividad.estado == ESTADO_CANCELADA
 
@@ -235,17 +250,17 @@ def test_panel_shows_single_badge_when_activity_includes_all_careers(
 
     panel_response = client.get("/admin/actividades")
     assert panel_response.status_code == 200
-    activity_row = panel_response.text.split("Actividad nueva", 1)[1].split("</tr>", 1)[0]
+    activity_row = table_row(panel_response, "Actividad nueva")
     assert "Todas las carreras" in activity_row
     assert "Arquitectura" not in activity_row
     assert "Psicología" not in activity_row
-    partial_row = panel_response.text.split("Actividad parcial", 1)[1].split("</tr>", 1)[0]
+    partial_row = table_row(panel_response, "Actividad parcial")
     assert "Arquitectura" in partial_row
     assert "Todas las carreras" not in partial_row
 
 
 def test_finalized_activity_panel_shows_inscriptions_attendance_and_duplicate_action(
-    admin_actividades_client,
+    admin_actividades_client, user_factory,
 ):
     client, db_session, _docente, carrera = admin_actividades_client
     fecha_inicio = datetime.now(timezone.utc) - timedelta(hours=4)
@@ -262,11 +277,21 @@ def test_finalized_activity_panel_shows_inscriptions_attendance_and_duplicate_ac
     )
     db_session.add(actividad)
     db_session.commit()
+    student = user_factory(rol="estudiante", email="inscripto@example.com")
+    db_session.add(
+        Inscripcion(
+            actividad_id=actividad.id,
+            user_id=student.id,
+            estado=INSCRIPCION_ALTA,
+        )
+    )
+    db_session.commit()
 
     response = client.get("/admin/actividades")
 
     assert response.status_code == 200
-    row = response.text.split("Actividad finalizada", 1)[1].split("</tr>", 1)[0]
+    row = table_row(response, "Actividad finalizada")
+    print(row)
     assert "Inscriptos" in row
     assert "Asistencia" in row
     assert "Ver encuestas" in row
@@ -276,6 +301,12 @@ def test_finalized_activity_panel_shows_inscriptions_attendance_and_duplicate_ac
     assert "Editar" not in row
     assert "Cancelar" not in row
     assert f"copiar_de={actividad.id}" in row
+
+    inscriptos_response = client.get(
+        f"/admin/actividades/{actividad.id}/inscriptos"
+    )
+    assert inscriptos_response.status_code == 200
+    assert "inscripto@example.com" in inscriptos_response.text
 
 
 def test_duplicate_activity_form_copies_settings_but_clears_dates(
@@ -324,7 +355,7 @@ def test_create_activity_rejects_credits_not_in_half_point_steps(admin_actividad
     response = client.post("/admin/actividades", data=data)
 
     assert response.status_code == 303
-    assert "múltiplo de 0,5" in redirect_query(response, "err")
+    assert_flash_redirect(client, response, "múltiplo de 0,5")
     assert db_session.query(Actividad).count() == 0
 
 
@@ -382,7 +413,7 @@ def test_create_activity_with_invalid_dates_redirects_with_error(admin_actividad
     response = client.post("/admin/actividades", data=data)
 
     assert response.status_code == 303
-    assert redirect_query(response, "err").startswith("Fechas inválidas")
+    assert_flash_redirect(client, response, "Fechas inválidas")
     assert db_session.query(Actividad).count() == 0
 
 
@@ -483,7 +514,7 @@ def test_activity_without_career_cannot_be_published(admin_actividades_client):
     publish_response = client.post(f"/admin/actividades/{actividad.id}/publicar")
 
     assert publish_response.status_code == 303
-    assert "sin carreras asociadas" in redirect_query(publish_response, "err")
+    assert_flash_redirect(client, publish_response, "sin carreras asociadas")
     db_session.refresh(actividad)
     assert actividad.estado == ESTADO_BORRADOR
 
@@ -505,9 +536,9 @@ def test_publishing_finished_activity_redirects_to_edit_with_warning(
     assert urlsplit(response.headers["location"]).path == (
         f"/admin/actividades/{activity.id}/editar"
     )
-    assert redirect_query(response, "err") == (
+    assert_flash_redirect(client, response, (
         "La actividad ya finalizó, para publicar modificá las fechas de inicio y cierre"
-    )
+    ))
     db_session.refresh(activity)
     assert activity.estado == ESTADO_BORRADOR
 
@@ -559,4 +590,4 @@ def test_missing_activity_endpoints_redirect_with_not_found(admin_actividades_cl
     ]:
         response = method(path)
         assert response.status_code == 303
-        assert "Actividad no encontrada" in redirect_query(response, "err")
+        assert_flash_redirect(client, response, "Actividad no encontrada")

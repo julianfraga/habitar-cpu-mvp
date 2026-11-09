@@ -290,12 +290,17 @@ def cancelar(request: Request, actividad_id: int, user: User = Depends(REQUIERE_
             request, "panel",
             query_params={"err": "Actividad no encontrada."},
         )
-    services.actividades.update_estado(db, a, ESTADO_CANCELADA)
-    return redirect_to(
-        request, "panel",
-        query_params={"msg": "Actividad cancelada."},
-    )
-
+    if not a.finalizada:
+        services.actividades.update_estado(db, a, ESTADO_CANCELADA)
+        return redirect_to(
+            request, "panel",
+            query_params={"msg": "Actividad cancelada."},
+        )
+    else:
+        return redirect_to(
+            request, "panel",
+            query_params={"msg": "No se puede cancelar una actividad terminada"},
+        )
 @router.get("/{actividad_id}/export.csv")
 def export_csv(actividad_id: int, user: User = Depends(REQUIERE_ADMIN), db: Session = Depends(get_db)):
     df = services.inscripcion.inscriptos_dataframe(db, actividad_id)

@@ -122,9 +122,11 @@ def test_password_reset_sends_code_and_changes_password(
 
     assert response.status_code == 303
     assert urlsplit(response.headers["location"]).path == "/login"
-    assert parse_qs(urlsplit(response.headers["location"]).query)["msg"] == [
-        "Contraseña restablecida. Ya podés ingresar."
-    ]
+    assert not {"msg", "err"} & set(
+        parse_qs(urlsplit(response.headers["location"]).query)
+    )
+    login_page = client.get(response.headers["location"])
+    assert "Contraseña restablecida. Ya podés ingresar." in login_page.text
     assert services.identity.authenticate(
         db_session,
         user.email,

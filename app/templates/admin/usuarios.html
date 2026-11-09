@@ -179,9 +179,11 @@
           result.creditos_requeridos;
         status.textContent = "Créditos actualizados.";
         status.className = "type-body-small text-success-strong";
+        window.showToast("Créditos actualizados.", "success");
       } catch (error) {
         status.textContent = error.message;
         status.className = "type-body-small text-danger-strong";
+        window.showToast(error.message);
       } finally {
         button.disabled = false;
       }

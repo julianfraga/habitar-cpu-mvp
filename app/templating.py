@@ -72,6 +72,12 @@ def render(request, name, *, user=None, db=None, status_code: int = 200, **ctx):
     context = {"user": user, "unread": 0}
     if db is not None and user is not None:
         context["unread"] = unread_count(db, user.id)
+    alerts = list(request.session.pop("flash_messages", []))
+    for key, level in (("msg", "success"), ("err", "error"), ("notice", "info")):
+        message = ctx.pop(key, None)
+        if message:
+            alerts.append({"level": level, "message": str(message)})
+    context["alerts"] = alerts
     context.update(ctx)
     return templates.TemplateResponse(request, name, context, status_code=status_code)
 
@@ -86,7 +92,20 @@ def redirect_to(
 ) -> RedirectResponse:
     url = request.url_for(endpoint, **path_params)
     if query_params:
-        url = url.include_query_params(**query_params)
+        params = dict(query_params)
+        alerts = list(request.session.get("flash_messages", []))
+        for key, level in (
+            ("msg", "success"),
+            ("err", "error"),
+            ("notice", "info"),
+        ):
+            message = params.pop(key, None)
+            if message:
+                alerts.append({"level": level, "message": str(message)})
+        if alerts:
+            request.session["flash_messages"] = alerts
+        if params:
+            url = url.include_query_params(**params)
     location = url.path
     if url.query:
         location = f"{location}?{url.query}"

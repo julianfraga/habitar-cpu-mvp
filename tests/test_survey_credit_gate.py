@@ -60,10 +60,8 @@ def test_manual_attendance_stays_valid_and_survey_submission_awards_credits(
                 f"/docente/actividades/{activity.id}/marcar/{student.id}"
             )
             assert attendance_response.status_code == 303
-            message = parse_qs(
-                urlsplit(attendance_response.headers["location"]).query
-            )["msg"][0]
-            assert "debe responder la encuesta" in message
+            attendance_page = client.get(attendance_response.headers["location"])
+            assert "debe responder la encuesta" in attendance_page.text
 
             attendance = db_session.query(Asistencia).one()
             assert attendance.estado_creditos == ESTADO_CREDITOS_PENDIENTE_ENCUESTA

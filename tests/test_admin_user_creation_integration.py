@@ -58,9 +58,10 @@ def test_user_import_creates_account_and_sends_its_temporary_password(
 
     assert response.status_code == 303
     assert urlsplit(response.headers["location"]).path == "/admin/usuarios"
-    assert parse_qs(urlsplit(response.headers["location"]).query)["msg"] == [
-        "Creados 1 usuarios nuevos."
-    ]
+    query = parse_qs(urlsplit(response.headers["location"]).query)
+    assert "msg" not in query and "err" not in query
+    result_page = client.get(response.headers["location"])
+    assert "Creados 1 usuarios nuevos." in result_page.text
 
     student = (
         db_session.query(User)
