@@ -16,6 +16,8 @@ from app.models import (
 from app.services.actividades import (
     ActividadContext,
     DocentesInput,
+    clasificar_cambio_fecha,
+    cancelar_y_republicar,
     create,
     cupo_info,
     get,
@@ -63,7 +65,7 @@ def test_cupo_info_no_informa_cupos_negativos(db_session, actividad_factory, use
 
 def test_listar_disponibles_aplica_filtros_y_ordena(db_session, actividad_factory, carrera_factory):
     carrera = carrera_factory()
-    base = datetime(2026, 9, 20, tzinfo=timezone.utc)
+    base = datetime.now(timezone.utc) + timedelta(days=10)
     actividad_factory(
         titulo="Taller virtual",
         fecha_inicio=base + timedelta(hours=2),
@@ -84,17 +86,90 @@ def test_listar_disponibles_aplica_filtros_y_ordena(db_session, actividad_factor
 
     resultado = listar_disponibles(
         db_session,
-        carreras_ids=[carrera.id],
+        carrera_id=[carrera.id],
         tipo="presencial",
-        fecha="2026-09-20",
+        fecha=base.date().isoformat(),
         min_creditos=3,
     )
 
     assert resultado == [esperada]
 
 
+def test_clasificar_cambio_fecha_aplica_limites_inclusivos(
+    actividad_factory,
+):
+    now = datetime.now(timezone.utc)
+    con_anticipacion = actividad_factory(
+        fecha_inicio=now + timedelta(days=10)
+    )
+    sin_anticipacion = actividad_factory(
+        fecha_inicio=now + timedelta(days=4)
+    )
+
+    assert clasificar_cambio_fecha(
+        con_anticipacion,
+        con_anticipacion.fecha_inicio + timedelta(days=1),
+        fecha_modificacion=now,
+    ) == "edicion_estandar"
+    assert clasificar_cambio_fecha(
+        sin_anticipacion,
+        sin_anticipacion.fecha_inicio + timedelta(hours=48),
+        fecha_modificacion=now,
+    ) == "cancelar_republicar"
+    assert clasificar_cambio_fecha(
+        sin_anticipacion,
+        sin_anticipacion.fecha_inicio + timedelta(hours=47, minutes=59),
+        fecha_modificacion=now,
+    ) == "reprogramacion"
+
+
+def test_cancelar_y_republicar_crea_actividad_nueva_sin_traspasar_inscriptos(
+    db_session, actividad_factory, user_factory, carrera_factory
+):
+    carrera = carrera_factory()
+    actividad = actividad_factory(
+        estado=ESTADO_PUBLICADA,
+        fecha_inicio=datetime.now(timezone.utc) + timedelta(days=2),
+        carreras=[carrera],
+    )
+    estudiante = user_factory()
+    db_session.add(
+        Inscripcion(
+            actividad_id=actividad.id,
+            user_id=estudiante.id,
+            estado="inscripto",
+        )
+    )
+    db_session.commit()
+    contexto = ActividadContext(
+        titulo="Nueva fecha",
+        descripcion=actividad.descripcion,
+        tipo=actividad.tipo,
+        fecha_inicio=actividad.fecha_inicio + timedelta(days=3),
+        fecha_fin=actividad.fecha_fin + timedelta(days=3),
+        lugar=actividad.lugar,
+        docentes=list(actividad.docentes),
+        creditos=Decimal(str(actividad.creditos)),
+        cupo_max=actividad.cupo_max,
+        encuesta_obligatoria=actividad.encuesta_obligatoria,
+        preguntas=actividad.preguntas,
+        carreras_asociadas=list(actividad.carreras_asociadas),
+    )
+
+    nueva, inscriptos_anteriores = cancelar_y_republicar(
+        db_session, actividad, contexto, created_by=None
+    )
+
+    assert actividad.estado == ESTADO_CANCELADA
+    assert nueva.id != actividad.id
+    assert nueva.estado == ESTADO_PUBLICADA
+    assert not nueva.inscripciones
+    assert inscriptos_anteriores[0].estado == "baja"
+    assert not inscriptos_anteriores[0].baja_penalizada
+
+
 def test_listar_disponibles_devuelve_vacio_para_estudiante_sin_carreras(db_session):
-    assert listar_disponibles(db_session, carreras_ids=[]) == []
+    assert listar_disponibles(db_session, carrera_id=[]) == []
 
 
 def test_listar_disponibles_solo_con_cupo_excluye_llenas(

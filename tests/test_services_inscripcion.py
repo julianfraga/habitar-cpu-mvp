@@ -17,6 +17,8 @@ from app.services.inscripcion import (
     my_actividades,
     inscriptos_dataframe,
     cancellation_penalty_applies,
+    baja_penalizada_previa,
+    revocar_penalizaciones_reprogramacion,
     unenroll,
 )
 from app.services.consultas_comunes import is_enrolled
@@ -63,12 +65,32 @@ def test_inscribir_y_consultar_inscripcion(db_session, actividad_factory, user_f
     assert [e.user_id for e in inscriptos(db_session, actividad.id)] == [usuario.id]
 
 
+def test_inscripcion_cerrada_respeta_umbral_y_reprogramacion_corta(
+    db_session, actividad_factory, user_factory
+):
+    inicio = datetime.now(timezone.utc) + timedelta(minutes=30)
+    cerrada = actividad_factory(
+        estado=ESTADO_PUBLICADA, fecha_inicio=inicio
+    )
+    reprogramada = actividad_factory(
+        estado=ESTADO_PUBLICADA,
+        fecha_inicio=inicio,
+    )
+    reprogramada.reprogramada_corto_plazo = True
+    db_session.commit()
+    usuario = user_factory()
+
+    assert cerrada.inscripcion_cerrada
+    assert not reprogramada.inscripcion_cerrada
+    assert inscribir(db_session, reprogramada.id, usuario.id) == reprogramada
+
+
 def test_inscribir_rechaza_actividad_con_inscripcion_cerrada(
     db_session, actividad_factory, user_factory
 ):
     actividad = actividad_factory(
         estado=ESTADO_PUBLICADA,
-        fecha_inicio=datetime.now(timezone.utc) + timedelta(hours=23),
+        fecha_inicio=datetime.now(timezone.utc) + timedelta(minutes=30),
     )
     usuario = user_factory()
 
@@ -159,6 +181,56 @@ def test_unenroll_penaliza_solo_dentro_de_24_horas(
     if expected_penalty:
         assert "baja tardía" in notifications[0].mensaje
         assert "menos de 24 horas" in notifications[0].mensaje
+
+
+def test_baja_penalizada_bloquea_reinscripcion_solo_en_esa_actividad(
+    db_session, actividad_factory, user_factory
+):
+    now = datetime.now(timezone.utc)
+    actividad = actividad_factory(
+        estado=ESTADO_PUBLICADA,
+        fecha_inicio=now + timedelta(hours=12),
+    )
+    otra_actividad = actividad_factory(
+        estado=ESTADO_PUBLICADA,
+        fecha_inicio=now + timedelta(days=2),
+    )
+    usuario = user_factory()
+    inscribir(db_session, actividad.id, usuario.id)
+
+    assert unenroll(db_session, actividad.id, usuario.id, now=now)
+    assert baja_penalizada_previa(db_session, actividad, usuario.id)
+    with pytest.raises(EnrollError, match="baja fue penalizada"):
+        inscribir(db_session, actividad.id, usuario.id)
+    assert inscribir(db_session, otra_actividad.id, usuario.id) == otra_actividad
+    db_session.refresh(usuario.estudiante)
+    assert usuario.estudiante.creditos_penalizacion == 1.0
+
+
+def test_reprogramacion_revoca_penalizacion_y_baja_futura_no_penaliza(
+    db_session, actividad_factory, user_factory
+):
+    now = datetime.now(timezone.utc)
+    actividad = actividad_factory(
+        estado=ESTADO_PUBLICADA,
+        fecha_inicio=now + timedelta(hours=12),
+    )
+    usuario = user_factory()
+    inscribir(db_session, actividad.id, usuario.id)
+    assert unenroll(db_session, actividad.id, usuario.id, now=now)
+
+    actividad.reprogramada_corto_plazo = True
+    db_session.commit()
+    assert revocar_penalizaciones_reprogramacion(db_session, actividad) == 1
+    db_session.refresh(usuario.estudiante)
+    db_session.refresh(db_session.query(Inscripcion).one())
+    assert usuario.estudiante.creditos_penalizacion == 0.0
+    assert not baja_penalizada_previa(db_session, actividad, usuario.id)
+
+    inscribir(db_session, actividad.id, usuario.id)
+    assert not unenroll(db_session, actividad.id, usuario.id, now=now)
+    db_session.refresh(usuario.estudiante)
+    assert usuario.estudiante.creditos_penalizacion == 0.0
 
 
 def test_cancellation_penalty_applies_respeta_horas_y_estado(

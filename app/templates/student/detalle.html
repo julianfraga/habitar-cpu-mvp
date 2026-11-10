@@ -45,6 +45,8 @@
       </div>
     {% elif a.finalizada or inscripcion_cerrada %}
       <button type="button" disabled class="surface-muted text-subtle border-width border-soft radius-control px-6 py-2.5 weight-medium cursor-disabled">Inscribirme</button>
+    {% elif baja_penalizada_previa %}
+      <span class="text-danger-bright weight-medium">No podés reinscribirte en esta actividad después de una baja penalizada. Si la actividad se reprograma, podrás volver a anotarte.</span>
     {% elif cupo.full %}
       <span class="text-danger-bright weight-medium">No quedan cupos disponibles.</span>
     {% else %}

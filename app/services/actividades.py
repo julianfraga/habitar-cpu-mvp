@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.schemas.forms import ActividadForm
+from app.config import settings
 from app.models import (
     Actividad,
     Docente,
@@ -17,6 +18,7 @@ from app.models import (
     ESTADO_PUBLICADA,
     Inscripcion,
     INSCRIPCION_ALTA,
+    INSCRIPCION_BAJA,
     Carrera,
     Persona,
     RespuestaEncuesta,
@@ -51,6 +53,33 @@ class ActividadContext:
     encuesta_obligatoria: bool
     preguntas: dict[str, str]
     carreras_asociadas: list[Carrera]
+
+
+def clasificar_cambio_fecha(
+    actividad: Actividad,
+    fecha_nueva: datetime,
+    *,
+    fecha_modificacion: datetime | None = None,
+) -> str:
+    fecha_vieja = to_local_datetime(actividad.fecha_inicio).astimezone(timezone.utc)
+    fecha_nueva_utc = fecha_nueva.astimezone(timezone.utc)
+    modificada = fecha_modificacion or datetime.now(timezone.utc)
+    if modificada.tzinfo is None:
+        modificada = modificada.replace(tzinfo=timezone.utc)
+    else:
+        modificada = modificada.astimezone(timezone.utc)
+
+    if fecha_nueva_utc == fecha_vieja:
+        return "sin_cambio"
+    if modificada <= fecha_vieja - timedelta(
+        days=settings.UMBRAL_ANTICIPACION_REPROGRAMACION_DIAS
+    ):
+        return "edicion_estandar"
+    if fecha_nueva_utc >= fecha_vieja + timedelta(
+        hours=settings.UMBRAL_REPROGRAMACION_HORAS
+    ):
+        return "cancelar_republicar"
+    return "reprogramacion"
 
 
 def actividad_form_data(form: ActividadForm) -> dict[str, object]:
@@ -332,7 +361,7 @@ def _clave_estado_actividad(actividad: Actividad) -> int:
 def listar_disponibles(
     db: Session,
     *,
-    carrera_id: list[int] | None = None,
+    carrera_id: int | list[int] | None = None,
     tipo: str | None = None,
     fecha: str | None = None,
     min_creditos: Decimal | None = None,
@@ -344,16 +373,16 @@ def listar_disponibles(
     #si es estudiante, habrá una lista de ids (puede ser vacía)
     #si no es estudiante, carreras_ids es None
     #caso estudiante no tiene asignada ninguna carrera, early return
-    if carrera_id is None: 
+    carrera_ids = (
+        [carrera_id] if isinstance(carrera_id, int) else carrera_id
+    )
+    if not carrera_ids:
         return []
 
-    stmt = select(Actividad).where(
-        Actividad.estado == ESTADO_PUBLICADA
-        and not Actividad.finalizada 
-        and not Actividad.inscripcion_cerrada)
-
-    if carrera_id:
-        stmt = stmt.where(Actividad.carreras_asociadas.any(Carrera.id == carrera_id))
+    stmt = select(Actividad).where(Actividad.estado == ESTADO_PUBLICADA)
+    stmt = stmt.where(
+        Actividad.carreras_asociadas.any(Carrera.id.in_(carrera_ids))
+    )
     if tipo:
         stmt = stmt.where(Actividad.tipo == tipo)
     if min_creditos:
@@ -402,12 +431,51 @@ def create(
     created_by: int | None = None,
 ) -> Actividad:
     '''Crea una nueva actividad en la base de datos a partir del contexto proporcionado.'''
+    actividad = _actividad_desde_contexto(contexto, created_by=created_by)
+    db.add(actividad)
+    db.commit()
+    db.refresh(actividad)
+    return actividad
+
+
+def cancelar_y_republicar(
+    db: Session,
+    actividad: Actividad,
+    contexto: ActividadContext,
+    *,
+    created_by: int | None,
+) -> tuple[Actividad, list[Inscripcion]]:
+    inscriptos_activos = (
+        db.query(Inscripcion)
+        .filter(
+            Inscripcion.actividad_id == actividad.id,
+            Inscripcion.estado == INSCRIPCION_ALTA,
+        )
+        .all()
+    )
+    for inscripcion in inscriptos_activos:
+        inscripcion.estado = INSCRIPCION_BAJA
+    actividad.estado = ESTADO_CANCELADA
+    nueva_actividad = _actividad_desde_contexto(
+        contexto, created_by=created_by
+    )
+    db.add(nueva_actividad)
+    db.commit()
+    db.refresh(nueva_actividad)
+    return nueva_actividad, inscriptos_activos
+
+
+def _actividad_desde_contexto(
+    contexto: ActividadContext,
+    *,
+    created_by: int | None,
+) -> Actividad:
     estado = (
         ESTADO_BORRADOR
         if not contexto.carreras_asociadas
         else ESTADO_PUBLICADA
     )
-    actividad = Actividad(
+    return Actividad(
         titulo=contexto.titulo,
         descripcion=contexto.descripcion,
         tipo=contexto.tipo,
@@ -423,10 +491,6 @@ def create(
         estado=estado,
         created_by=created_by,
     )
-    db.add(actividad)
-    db.commit()
-    db.refresh(actividad)
-    return actividad
 
 
 def update(

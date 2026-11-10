@@ -10,6 +10,7 @@ from app.models import (
     ESTADO_CREDITOS_PENDIENTE_ENCUESTA,
     ESTADO_PUBLICADA,
     RespuestaEncuesta,
+    SesionAsistencia,
 )
 from app.services import asistencia
 from app.services.asistencia import (
@@ -67,8 +68,6 @@ def test_attendance_window_has_stable_activity_code(
 def test_enrollment_closure_emails_roster_qr_code_and_close_link(
     db_session, actividad_factory, user_factory, carrera_factory, monkeypatch
 ):
-    from app.services import mailing
-
     career = carrera_factory(nombre="Ingeniería")
     teacher = user_factory(
         rol="docente", email="docente@example.com"
@@ -84,7 +83,7 @@ def test_enrollment_closure_emails_roster_qr_code_and_close_link(
     activity.docentes.append(teacher.docente)
     db_session.commit()
     inscribir(db_session, activity.id, student.id)
-    activity.fecha_inicio = datetime.now(timezone.utc) + timedelta(hours=12)
+    activity.fecha_inicio = datetime.now(timezone.utc) + timedelta(minutes=30)
     db_session.commit()
 
     sent = []
@@ -93,7 +92,7 @@ def test_enrollment_closure_emails_roster_qr_code_and_close_link(
         sent.append((to, subject, body, attachments))
         return True
 
-    monkeypatch.setattr(mailing, "send_email", record_email)
+    monkeypatch.setattr(asistencia, "send_email", record_email)
     now = datetime.now(timezone.utc)
     count = asistencia.procesar_mails_actividades_cerradas(
         db_session, now=now
@@ -108,10 +107,7 @@ def test_enrollment_closure_emails_roster_qr_code_and_close_link(
     to, subject, body, attachments = sent[0]
     assert to == teacher.email
     assert subject == f"Inscripción cerrada: {activity.titulo}"
-    assert "Nombre: Ana" in body
-    assert "Apellido: Pérez" in body
-    assert "Mail: alumno@example.com" in body
-    assert "Carrera: Grado Ingeniería" in body
+    assert "| Ana | Pérez | alumno@example.com | Grado Ingeniería |" in body
     window = (
         db_session.query(asistencia.VentanaAsistencia)
         .filter_by(actividad_id=activity.id)
@@ -122,6 +118,58 @@ def test_enrollment_closure_emails_roster_qr_code_and_close_link(
     assert len(attachments) == 1
     assert attachments[0][0] == f"asistencia-{activity.id}.png"
     assert attachments[0][2] == "image/png"
+
+
+def test_renovar_accesos_revoca_qr_y_enlace_y_reenvia_datos_docentes(
+    db_session, actividad_factory, user_factory, monkeypatch
+):
+    teacher = user_factory(rol="docente", email="docente@example.com")
+    activity = actividad_factory(
+        estado=ESTADO_PUBLICADA,
+        fecha_inicio=datetime.now(timezone.utc) + timedelta(hours=12),
+    )
+    activity.docentes.append(teacher.docente)
+    db_session.commit()
+    window = asegurar_ventana_asistencia(db_session, activity.id)
+    old_code = window.codigo
+    old_close_code = window.codigo_cierre
+    db_session.add(
+        SesionAsistencia(
+            actividad_id=activity.id,
+            token="old-session-token",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            created_by=teacher.id,
+        )
+    )
+    window.cerrada_manualmente = True
+    window.correos_enviados = '["docente@example.com"]'
+    db_session.commit()
+
+    sent = []
+    monkeypatch.setattr(
+        asistencia,
+        "_generar_adjunto_qr",
+        lambda actividad_id, code: ("qr.png", b"qr", "image/png"),
+    )
+    monkeypatch.setattr(
+        asistencia,
+        "send_email",
+        lambda *args, **kwargs: sent.append((args, kwargs)) or True,
+    )
+
+    enviados, fallidos = asistencia.renovar_accesos_docente(db_session, activity)
+
+    db_session.refresh(window)
+    assert enviados == 1
+    assert fallidos == 0
+    assert len(sent) == 1
+    assert window.codigo != old_code
+    assert window.codigo_cierre != old_close_code
+    assert not window.cerrada_manualmente
+    assert window.correos_enviados == '["docente@example.com"]'
+    assert db_session.query(SesionAsistencia).filter_by(
+        token="old-session-token"
+    ).count() == 0
 
 
 def test_check_in_registra_asistencia_para_usuario_inscripto(

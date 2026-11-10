@@ -23,7 +23,11 @@ from app.models import (
     User,
 )
 from app.security import hash_password
-from app.services.parsing import parse_duracion, parse_intervalo_tiempo
+from app.services.parsing import (
+    parse_duracion,
+    parse_intervalo_tiempo,
+    to_local_datetime,
+)
 from app.templating import _fmt_dt
 from app.services.credits import accumulated_credits
 
@@ -307,6 +311,122 @@ def test_finalized_activity_panel_shows_inscriptions_attendance_and_duplicate_ac
     )
     assert inscriptos_response.status_code == 200
     assert "inscripto@example.com" in inscriptos_response.text
+
+
+def test_update_after_close_reprograms_and_refreshes_teacher_access(
+    admin_actividades_client, user_factory, monkeypatch
+):
+    from app.services import asistencia
+
+    client, db_session, docente, carrera = admin_actividades_client
+    inicio_anterior = datetime.now(timezone.utc) + timedelta(minutes=25)
+    actividad = Actividad(
+        titulo="Actividad próxima",
+        descripcion="Descripción",
+        tipo="presencial",
+        fecha_inicio=inicio_anterior,
+        fecha_fin=inicio_anterior + timedelta(hours=2),
+        lugar="Campus",
+        cupo_max=30,
+        estado=ESTADO_PUBLICADA,
+        docentes=[docente.docente],
+        carreras_asociadas=[carrera],
+    )
+    estudiante = user_factory()
+    db_session.add(actividad)
+    db_session.commit()
+    db_session.add(
+        Inscripcion(
+            actividad_id=actividad.id,
+            user_id=estudiante.id,
+            estado=INSCRIPCION_ALTA,
+        )
+    )
+    db_session.commit()
+    ventana = asistencia.asegurar_ventana_asistencia(db_session, actividad.id)
+    codigo_anterior = ventana.codigo
+    enlace_anterior = ventana.codigo_cierre
+    monkeypatch.setattr(
+        asistencia,
+        "_generar_adjunto_qr",
+        lambda actividad_id, codigo: ("qr.png", b"qr", "image/png"),
+    )
+    monkeypatch.setattr(asistencia, "send_email", lambda *args, **kwargs: True)
+
+    fecha_nueva = datetime.now(timezone.utc) + timedelta(minutes=20)
+    data = actividad_form_data(docente.docente_id, carrera.id)
+    data["fecha_inicio"] = to_local_datetime(fecha_nueva).strftime(
+        "%Y-%m-%dT%H:%M"
+    )
+    data["fecha_fin"] = to_local_datetime(
+        fecha_nueva + timedelta(hours=2)
+    ).strftime("%Y-%m-%dT%H:%M")
+    response = client.post(f"/admin/actividades/{actividad.id}", data=data)
+
+    db_session.refresh(actividad)
+    db_session.refresh(ventana)
+    assert response.status_code == 303
+    assert actividad.reprogramada_corto_plazo
+    assert not actividad.inscripcion_cerrada
+    assert db_session.query(Inscripcion).one().estado == INSCRIPCION_ALTA
+    assert ventana.codigo != codigo_anterior
+    assert ventana.codigo_cierre != enlace_anterior
+    assert not ventana.cerrada_manualmente
+
+
+def test_update_at_48_hours_cancels_and_creates_new_activity(
+    admin_actividades_client, user_factory
+):
+    client, db_session, docente, carrera = admin_actividades_client
+    inicio_anterior = (
+        datetime.now(timezone.utc) + timedelta(days=2)
+    ).replace(second=0, microsecond=0)
+    actividad = Actividad(
+        titulo="Actividad anterior",
+        descripcion="Descripción",
+        tipo="presencial",
+        fecha_inicio=inicio_anterior,
+        fecha_fin=inicio_anterior + timedelta(hours=2),
+        lugar="Campus",
+        cupo_max=30,
+        estado=ESTADO_PUBLICADA,
+        docentes=[docente.docente],
+        carreras_asociadas=[carrera],
+    )
+    estudiante = user_factory()
+    db_session.add(actividad)
+    db_session.commit()
+    db_session.add(
+        Inscripcion(
+            actividad_id=actividad.id,
+            user_id=estudiante.id,
+            estado=INSCRIPCION_ALTA,
+        )
+    )
+    db_session.commit()
+
+    fecha_nueva = inicio_anterior + timedelta(hours=48)
+    data = actividad_form_data(docente.docente_id, carrera.id)
+    data["fecha_inicio"] = to_local_datetime(fecha_nueva).strftime(
+        "%Y-%m-%dT%H:%M"
+    )
+    data["fecha_fin"] = to_local_datetime(
+        fecha_nueva + timedelta(hours=2)
+    ).strftime("%Y-%m-%dT%H:%M")
+    response = client.post(f"/admin/actividades/{actividad.id}", data=data)
+
+    db_session.refresh(actividad)
+    nueva = db_session.query(Actividad).filter(
+        Actividad.id != actividad.id
+    ).one()
+    assert response.status_code == 303
+    assert actividad.estado == ESTADO_CANCELADA
+    assert nueva.estado == ESTADO_PUBLICADA
+    assert nueva.fecha_inicio == fecha_nueva.replace(
+        second=0, microsecond=0, tzinfo=None
+    )
+    assert db_session.query(Inscripcion).one().estado != INSCRIPCION_ALTA
+    assert nueva.inscripciones == []
 
 
 def test_cancelled_activity_edit_prefills_associated_careers(

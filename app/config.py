@@ -46,6 +46,19 @@ def _normalize_db_url(url: str) -> str:
     return url
 
 
+def _integer_setting(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default)).strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"{name} debe ser un número entero.") from None
+    if value < 0:
+        raise ValueError(f"{name} no puede ser negativo.")
+    return value
+
+
 class Settings:
     APP_NAME: str = os.getenv("APP_NAME", "Módulo Habitar")
     PUBLIC_BASE_URL: str = os.getenv(
@@ -72,5 +85,15 @@ class Settings:
     SMTP_USER: str = os.getenv("SMTP_USER", "")
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
     SMTP_FROM: str = os.getenv("SMTP_FROM", "Modulo Habitar <no-reply@example.com>")
+    MARGEN_BAJA_HORAS: int = _integer_setting("MARGEN_BAJA_HORAS", 24)
+    CIERRE_INSCRIPCIONES_HORAS: int = _integer_setting(
+        "CIERRE_INSCRIPCIONES_HORAS", 1
+    )
+    UMBRAL_REPROGRAMACION_HORAS: int = _integer_setting(
+        "UMBRAL_REPROGRAMACION_HORAS", 48
+    )
+    UMBRAL_ANTICIPACION_REPROGRAMACION_DIAS: int = _integer_setting(
+        "UMBRAL_ANTICIPACION_REPROGRAMACION_DIAS", 5
+    )
 
 settings = Settings()

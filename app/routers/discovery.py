@@ -89,10 +89,14 @@ def actividad_detail(
         and not asistencia_validada
         and services.inscripcion.cancellation_penalty_applies(actividad)
     )
+    baja_penalizada_previa = services.inscripcion.baja_penalizada_previa(
+        db, actividad, user.id
+    )
     return render(
         request, "student/detalle.html", user=user, db=db,
         a=actividad, cupo=cupo, enrolled=enrolled,
         asistencia_validada=asistencia_validada,
         penalizacion_baja=penalizacion_baja,
+        baja_penalizada_previa=baja_penalizada_previa,
         inscripcion_cerrada=actividad.inscripcion_cerrada,
     )

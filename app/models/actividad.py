@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 from app.models.associations import actividad_carrera
 from app.models.enums import ESTADO_BORRADOR, TIPO_PRESENCIAL
+from app.config import settings
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -47,6 +48,9 @@ class Actividad(Base):
     encuesta_obligatoria: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )
+    reprogramada_corto_plazo: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     preguntas: Mapped[dict[str, str]] = mapped_column(
         JSON, nullable=False, default=dict
     )
@@ -74,5 +78,9 @@ class Actividad(Base):
 
     @property
     def inscripcion_cerrada(self) -> bool:
-        """Indica si falta menos de 24 horas para el inicio de la actividad."""
-        return _as_utc(self.fecha_inicio) <= datetime.now(timezone.utc) + timedelta(hours=24)
+        """Indica si la inscripción está cerrada según el plazo configurado."""
+        now = datetime.now(timezone.utc)
+        inicio = _as_utc(self.fecha_inicio)
+        if self.reprogramada_corto_plazo:
+            return inicio <= now
+        return inicio <= now + timedelta(hours=settings.CIERRE_INSCRIPCIONES_HORAS)

@@ -69,7 +69,7 @@ def test_closed_enrollment_disables_registration_and_shows_badge(
     user.debe_cambiar_pw = False
     activity = actividad_factory(
         estado=ESTADO_PUBLICADA,
-        fecha_inicio=datetime.now(timezone.utc) + timedelta(hours=23),
+        fecha_inicio=datetime.now(timezone.utc) + timedelta(minutes=30),
         carreras=[carrera],
     )
     db_session.commit()
@@ -180,11 +180,12 @@ def test_inscription_confirmation_shows_cancellation_policy_below_banner(
     assert response.status_code == 200
     confirmation_position = response.text.index("¡Inscripción confirmada!")
     reminder_position = response.text.index(
-        "Recordá que podés darte de baja hasta 24hs antes del inicio"
+        "Podés darte de baja sin penalización con al menos 24 horas de anticipación."
     )
     assert confirmation_position < reminder_position
     assert (
-        "deberás acreditar 1 punto extra para completar el Módulo Habitar"
+        "Con menos de 24 horas se suma 1 crédito requerido; si la actividad fue reprogramada, "
+        "la baja no tiene penalización."
         in response.text
     )
 

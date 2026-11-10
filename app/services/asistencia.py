@@ -26,7 +26,9 @@ from app.models import (
     INSCRIPCION_ALTA,
     ROL_COORDINACION,
     ROL_ESTUDIANTE,
+    SesionAsistencia,
 )
+from app.config import settings
 from app.services.encuestas import estudiante_completo_encuesta
 from app.services.consultas_comunes import is_enrolled
 from app.config import settings
@@ -280,9 +282,11 @@ def _obtener_actividades_candidatas(db: Session, current_time: datetime) -> list
 
 
 def _esta_en_ventana_cierre(actividad:Actividad, current_time: datetime) -> bool:
-    """Verifica si la actividad inició hace menos de 24 horas o está por iniciar."""
+    """Verifica si la actividad está dentro del cierre configurado."""
     start = _normalizar_utc(actividad.fecha_inicio)
-    return start <= current_time + timedelta(hours=24)
+    return start <= current_time + timedelta(
+        hours=settings.CIERRE_INSCRIPCIONES_HORAS
+    )
 
 
 def _generar_adjunto_qr(actividad_id: int, codigo: str) -> tuple:
@@ -375,7 +379,7 @@ def _enviar_correos_docentes(
 def procesar_mails_actividades_cerradas(
     db: Session, *, now: datetime | None = None
 ) -> int:
-    """Envía correos a los docentes de actividades cuya inscripción se cerró en las últimas 24h,
+    """Envía correos al cerrar inscripción según el umbral configurado,
 
     con el listado de inscriptos y el código de asistencia. Devuelve la cantidad de correos enviados.
     """
@@ -408,6 +412,57 @@ def procesar_mails_actividades_cerradas(
         )
         
     return delivered
+
+
+def renovar_accesos_docente(
+    db: Session, actividad: Actividad
+) -> tuple[int, int]:
+    """Revoca accesos previos, genera otros y reenvía roster y QR a docentes."""
+    ventana = asegurar_ventana_asistencia(db, actividad.id)
+    _rotar_credenciales(db, actividad.id, ventana)
+    ventana.cerrada_manualmente = False
+    ventana.correos_enviados = "[]"
+    db.commit()
+
+    docentes = {d.email: d.nombre_completo for d in actividad.docentes if d.email}
+    if not docentes:
+        return 0, 0
+
+    attachment = _generar_adjunto_qr(actividad.id, ventana.codigo)
+    body = _construir_cuerpo_correo(db, actividad, ventana)
+    enviados = _enviar_correos_docentes(
+        db=db,
+        ventana_asistencia=ventana,
+        docentes=docentes,
+        notified_emails=set(),
+        titulo_actividad=actividad.titulo,
+        body=body,
+        attachment=attachment,
+    )
+    return enviados, len(docentes) - enviados
+
+
+def invalidar_accesos_docente(db: Session, actividad_id: int) -> None:
+    """Invalida QR, enlaces de cierre y sesiones de asistencia existentes."""
+    ventana = (
+        db.query(VentanaAsistencia)
+        .filter(VentanaAsistencia.actividad_id == actividad_id)
+        .one_or_none()
+    )
+    if ventana is not None:
+        _rotar_credenciales(db, actividad_id, ventana)
+        ventana.cerrada_manualmente = True
+    db.commit()
+
+
+def _rotar_credenciales(
+    db: Session, actividad_id: int, ventana: VentanaAsistencia
+) -> None:
+    ventana.codigo = _codigo_asistencia_unico(db)
+    ventana.codigo_cierre = secrets.token_urlsafe(48)
+    db.query(SesionAsistencia).filter(
+        SesionAsistencia.actividad_id == actividad_id
+    ).delete(synchronize_session=False)
 
 def check_in(db: Session, token: str, user_id: int) -> Actividad:
     """Validate a scanned token and mark the estudiante present. Raises AsistenciaError."""

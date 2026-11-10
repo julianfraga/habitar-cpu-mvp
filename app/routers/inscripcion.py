@@ -12,6 +12,7 @@ from app.security import current_user_required, requiere_roles
 from app import services
 from app.services.parsing import to_utc_datetime
 from app.templating import redirect_to, render
+from app.config import settings
 
 router = APIRouter()
 
@@ -46,9 +47,11 @@ def inscribir(
         query_params={
             "msg": "¡Inscripción confirmada! Te enviamos un mail.",
             "notice": (
-                "Recordá que podés darte de baja hasta 24hs antes del inicio de "
-                "la actividad. Si te das de baja con menos tiempo de anticipación, "
-                "deberás acreditar 1 punto extra para completar el Módulo Habitar"
+                f"Podés darte de baja sin penalización con al menos "
+                f"{settings.MARGEN_BAJA_HORAS} horas de anticipación. "
+                f"Con menos de {settings.MARGEN_BAJA_HORAS} horas se suma "
+                "1 crédito requerido; si la actividad fue reprogramada, "
+                "la baja no tiene penalización."
             ),
         },
     )
@@ -72,8 +75,8 @@ def baja(
         request, "actividad_detail", actividad_id=actividad_id,
         query_params={
             "msg": (
-                "Te diste de baja. Se sumó 1 crédito requerido por cancelar "
-                "con menos de 24 horas."
+                f"Te diste de baja. Se sumó 1 crédito requerido por cancelar "
+                f"con menos de {settings.MARGEN_BAJA_HORAS} horas."
                 if penalizada
                 else "Te diste de baja. Liberaste tu cupo."
             )

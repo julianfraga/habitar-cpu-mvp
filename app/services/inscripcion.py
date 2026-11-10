@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import UploadFile
 import pandas as pd
-from sqlalchemy import exists, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -17,6 +17,7 @@ from app.models import (
     INSCRIPCION_ALTA,
     User,
 )
+from app.config import settings
 from app.services.asistencia import present_user_ids
 from app.services.consultas_comunes import asistencia_validada, active_enrollment
 from app.services.notifications import notify
@@ -44,6 +45,12 @@ def inscribir(db: Session, actividad_id: int, user_id: int) -> Actividad:
     )
     if existing and existing.estado == INSCRIPCION_ALTA:
         raise EnrollError("Ya estás inscripto en esta actividad.")
+    if existing and existing.baja_penalizada and not actividad.reprogramada_corto_plazo:
+        raise EnrollError(
+            "No podés reinscribirte en esta actividad porque tu baja fue penalizada."
+        )
+    if existing and existing.baja_penalizada:
+        _revocar_penalizacion(db, existing)
 
     taken = (
         db.query(Inscripcion)
@@ -72,7 +79,9 @@ def cancellation_penalty_applies(
     return (
         current_time < fecha_inicio
         and current_time < fecha_fin
-        and fecha_inicio - current_time < timedelta(hours=24)
+        and not actividad.reprogramada_corto_plazo
+        and fecha_inicio - current_time
+        < timedelta(hours=settings.MARGEN_BAJA_HORAS)
     )
 
 
@@ -103,18 +112,60 @@ def unenroll(
 
     enr.estado = INSCRIPCION_BAJA
     if penalizar:
+        enr.baja_penalizada = True
         estudiante.creditos_penalizacion += 1.0
         notify(
             db,
             user,
             (
                 f"Penalización de 1 crédito requerido por baja tardía de "
-                f"'{actividad.titulo}': cancelación con menos de 24 horas "
+                f"'{actividad.titulo}': cancelación con menos de "
+                f"{settings.MARGEN_BAJA_HORAS} horas "
                 "de anticipación."
             ),
         )
     db.commit()
     return penalizar
+
+
+def revocar_penalizaciones_reprogramacion(
+    db: Session, actividad: Actividad
+) -> int:
+    """Revoca penalizaciones trazables de bajas anteriores a la reprogramación."""
+    inscripciones = (
+        db.query(Inscripcion)
+        .filter(
+            Inscripcion.actividad_id == actividad.id,
+            Inscripcion.baja_penalizada.is_(True),
+        )
+        .all()
+    )
+    for inscripcion in inscripciones:
+        _revocar_penalizacion(db, inscripcion)
+        notify(
+            db,
+            inscripcion.user,
+            (
+                f"Se anuló la penalización por baja de '{actividad.titulo}' "
+                "debido a su reprogramación. Ya podés volver a inscribirte."
+            ),
+            email_subject="Penalización anulada por reprogramación",
+        )
+    if inscripciones:
+        db.commit()
+    return len(inscripciones)
+
+
+def _revocar_penalizacion(db: Session, inscripcion: Inscripcion) -> None:
+    estudiante = db.get(Estudiante, inscripcion.user_id)
+    if estudiante is None:
+        raise RuntimeError(
+            "No se encontró el registro del estudiante para revocar su penalización."
+        )
+    estudiante.creditos_penalizacion = max(
+        estudiante.creditos_penalizacion - 1.0, 0.0
+    )
+    inscripcion.baja_penalizada = False
 
 
 def my_actividades(db: Session, user_id: int) -> list[Actividad]:
@@ -138,6 +189,22 @@ def inscriptos(db: Session, actividad_id: int) -> list[Inscripcion]:
         .filter(Inscripcion.actividad_id == actividad_id, Inscripcion.estado == INSCRIPCION_ALTA)
         .all()
     )
+
+
+def baja_penalizada_previa(
+    db: Session, actividad: Actividad, user_id: int
+) -> bool:
+    if actividad.reprogramada_corto_plazo:
+        return False
+    inscripcion = (
+        db.query(Inscripcion)
+        .filter(
+            Inscripcion.actividad_id == actividad.id,
+            Inscripcion.user_id == user_id,
+        )
+        .one_or_none()
+    )
+    return bool(inscripcion and inscripcion.baja_penalizada)
 
 
 def inscriptos_dataframe(db: Session, actividad_id: int) -> pd.DataFrame:

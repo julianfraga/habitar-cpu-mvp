@@ -1,10 +1,10 @@
 """E-08 Actividad management (coordination backoffice)."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request,status
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.orm import Session
 from starlette.templating import _TemplateResponse
@@ -28,7 +28,9 @@ from app.services.notifications import notify
 from app.security import REQUIERE_ADMIN
 from app import services 
 from app.schemas.forms import ActividadForm
+from app.services.parsing import to_utc_datetime
 from app.templating import build_sort_links, redirect_to, render
+from app.config import settings
 
 router = APIRouter()
 
@@ -162,9 +164,14 @@ def crear(
 def editar(request: Request, actividad_id: int, user: User = Depends(REQUIERE_ADMIN), db: Session = Depends(get_db)):
     a = services.actividades.get(db, actividad_id)
     if a is None:
-        return redirect_to(
-            request, "panel",
-            query_params={"err": "Actividad no encontrada."},
+        raise HTTPException(
+            status_code = status.HTTP_404_NOT_FOUND,
+            detail= "Actividad no encontrada"
+        )
+    if to_utc_datetime(a.fecha_fin) < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code = status.HTTP_400_BAD_REQUEST,
+            detail= "La actividad ha finalizado y no puede ser editada"
         )
     return _render_edit_form(request, a, user, db)
 
@@ -179,9 +186,9 @@ def actualizar(
 ) -> Response:
     a = services.actividades.get(db, actividad_id)
     if a is None:
-        return redirect_to(
-            request, "panel",
-            query_params={"err": "Actividad no encontrada."},
+        raise HTTPException(
+            status_code = status.HTTP_404_NOT_FOUND,
+            detail= "Actividad no encontrada"
         )
     form_data = services.actividades.actividad_form_data(form)
     try:
@@ -192,8 +199,70 @@ def actualizar(
         db.rollback()
         return _render_edit_form(request, a, user, db, error=str(exc), form_data=form_data)
 
-    was_published = a.estado == ESTADO_PUBLICADA
-    fecha_cambio = a.fecha_inicio != contexto.fecha_inicio
+    estaba_publicada = a.estado == ESTADO_PUBLICADA
+    ahora = datetime.now(timezone.utc)
+    inicio_original = to_utc_datetime(a.fecha_inicio)
+    cambia_fecha_inicio = (
+        inicio_original != to_utc_datetime(contexto.fecha_inicio)
+    )
+    cierre_ya_ocurrio = (
+        cambia_fecha_inicio
+        and ahora < inicio_original
+        and ahora
+        >= inicio_original
+        - timedelta(hours=settings.CIERRE_INSCRIPCIONES_HORAS)
+    )
+    tipo_cambio = services.actividades.clasificar_cambio_fecha(
+        a, contexto.fecha_inicio, fecha_modificacion=ahora
+    )
+
+    if estaba_publicada and tipo_cambio == "cancelar_republicar":
+        try:
+            nueva_actividad, inscriptos_anteriores = (
+                services.actividades.cancelar_y_republicar(
+                    db, a, contexto, created_by=user.id
+                )
+            )
+        except ValueError as exc:
+            db.rollback()
+            return _render_edit_form(
+                request, a, user, db, error=str(exc), form_data=form_data
+            )
+        services.asistencia.invalidar_accesos_docente(db, a.id)
+        try:
+            for inscripcion in inscriptos_anteriores:
+                notify(
+                    db,
+                    inscripcion.user,
+                    (
+                        f"La actividad '{a.titulo}' fue cancelada y republicada "
+                        f"para el {nueva_actividad.fecha_inicio.strftime('%d/%m/%Y %H:%M')}. "
+                        f"Si querés participar, inscribite en la nueva actividad "
+                        f"(#{nueva_actividad.id}); tu baja no tuvo penalización."
+                    ),
+                    email_subject="Actividad cancelada y republicada",
+                )
+            db.commit()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+        enviados, fallidos = (0, 0)
+        if cierre_ya_ocurrio:
+            enviados, fallidos = services.asistencia.renovar_accesos_docente(
+                db, nueva_actividad
+            )
+        mensaje = (
+            f"Actividad cancelada y republicada como nueva actividad "
+            f"#{nueva_actividad.id}; las bajas no recibieron penalización."
+        )
+        if fallidos:
+            mensaje += (
+                f" No se pudieron enviar {fallidos} correos docentes; "
+                "revisá la configuración de correo."
+            )
+        elif cierre_ya_ocurrio and enviados == 0:
+            mensaje += " No hay docentes con correo para enviar los nuevos accesos."
+        return redirect_to(request, "panel", query_params={"msg": mensaje})
+
     try:
         services.actividades.update(db, a, contexto)
     except ValueError as exc:
@@ -201,7 +270,12 @@ def actualizar(
         return _render_edit_form(
             request, a, user, db, error=str(exc), form_data=form_data
         )
+    if estaba_publicada and tipo_cambio == "reprogramacion":
+        a.reprogramada_corto_plazo = True
+        db.commit()
+        services.inscripcion.revocar_penalizaciones_reprogramacion(db, a)
     if not contexto.encuesta_obligatoria:
+        #si 
         estudiantes_pendientes = (
             db.query(Asistencia.user_id)
             .filter(
@@ -216,28 +290,49 @@ def actualizar(
             )
         if estudiantes_pendientes:
             db.commit()
-    if fecha_cambio:
+    if cambia_fecha_inicio:
         # Cambió la fecha de inicio: re-armar el recordatorio de 24h de los inscriptos.
         db.query(Inscripcion).filter(
             Inscripcion.actividad_id == actividad_id,
             Inscripcion.estado == INSCRIPCION_ALTA,
         ).update({Inscripcion.reminded: False})
         db.commit()
-    if was_published:
+    if estaba_publicada:
         # Best-effort notifications; the actividad update is already committed.
         try:
+            if tipo_cambio == "reprogramacion":
+                detalle_cambio = (
+                    " fue reprogramada; podés darte de baja sin penalización."
+                )
+            elif tipo_cambio == "edicion_estandar":
+                detalle_cambio = (
+                    " cambió con anticipación; se conservan las inscripciones y reglas."
+                )
+            else:
+                detalle_cambio = " fue actualizada."
             for enr in services.inscripcion.inscriptos(db, actividad_id):
                 notify(
                     db, enr.user,
-                    f"La actividad '{a.titulo}' fue actualizada. Revisá los nuevos datos (fecha {a.fecha_inicio.strftime('%d/%m/%Y %H:%M')}).",
+                    f"La actividad '{a.titulo}'{detalle_cambio} Revisá los nuevos datos (fecha {a.fecha_inicio.strftime('%d/%m/%Y %H:%M')}).",
                     email_subject="Cambios en una actividad inscripta",
                 )
             db.commit()
         except Exception:  # noqa: BLE001
             db.rollback()
+    enviados, fallidos = (0, 0)
+    if cierre_ya_ocurrio:
+        enviados, fallidos = services.asistencia.renovar_accesos_docente(db, a)
+    mensaje = "Actividad actualizada."
+    if fallidos:
+        mensaje += (
+            f" No se pudieron enviar {fallidos} correos docentes; "
+            "revisá la configuración de correo."
+        )
+    elif cierre_ya_ocurrio and enviados == 0:
+        mensaje += " No hay docentes con correo para enviar los nuevos accesos."
     return redirect_to(
         request, "panel",
-        query_params={"msg": "Actividad actualizada."},
+        query_params={"msg": mensaje},
     )
 
 
