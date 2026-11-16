@@ -810,28 +810,34 @@ def test_activity_without_career_cannot_be_published(admin_actividades_client):
     assert actividad.estado == ESTADO_BORRADOR
 
 
-def test_publishing_finished_activity_redirects_to_edit_with_warning(
+def test_finalized_activity_offers_duplicate_instead_of_publish(
     admin_actividades_client, actividad_factory
 ):
     client, db_session, _, carrera = admin_actividades_client
     now = datetime.now()
     activity = actividad_factory(
         fecha_inicio=now - timedelta(days=2),
-        estado=ESTADO_BORRADOR,
+        estado=ESTADO_PUBLICADA,
         carreras=[carrera],
     )
 
-    response = client.post(f"/admin/actividades/{activity.id}/publicar")
+    response = client.get("/admin/actividades")
 
-    assert response.status_code == 303
-    assert urlsplit(response.headers["location"]).path == (
-        f"/admin/actividades/{activity.id}/editar"
+    assert response.status_code == 200
+    row = table_row(response, activity.titulo)
+    assert "Publicar otra igual" in row
+    assert f"copiar_de={activity.id}" in row
+    assert f"/admin/actividades/{activity.id}/editar" not in row
+    assert f'action="/admin/actividades/{activity.id}/publicar"' not in row
+
+    duplicate_response = client.get(
+        f"/admin/actividades/nueva?copiar_de={activity.id}"
     )
-    assert_flash_redirect(client, response, (
-        "La actividad ya finalizó, para publicar modificá las fechas de inicio y cierre"
-    ))
+    assert duplicate_response.status_code == 200
+    assert f"Datos copiados de «{activity.titulo}»" in duplicate_response.text
+
     db_session.refresh(activity)
-    assert activity.estado == ESTADO_BORRADOR
+    assert activity.estado == ESTADO_PUBLICADA
 
 
 def test_disabling_activity_survey_releases_pending_credits(
