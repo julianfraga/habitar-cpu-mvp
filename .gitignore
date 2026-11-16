@@ -13,3 +13,7 @@ m-*.png
 TODO.md
 .github/
 data/
+*.csv
+INSTRUCTIVO.md
+schema.sql
+Whitepaper_Grupo10.docx.pdf
