@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.config import settings
 from app.models import (
     Docente,
     ESTADO_BORRADOR,
@@ -98,12 +99,18 @@ def test_listar_disponibles_aplica_filtros_y_ordena(db_session, actividad_factor
 def test_clasificar_cambio_fecha_aplica_limites_inclusivos(
     actividad_factory,
 ):
+    if settings.UMBRAL_ANTICIPACION_REPROGRAMACION_DIAS == 0:
+        pytest.skip("Un umbral de 0 días no permite una reprogramación futura cercana.")
     now = datetime.now(timezone.utc)
+    limite_anticipacion = settings.UMBRAL_ANTICIPACION_REPROGRAMACION_DIAS
+    umbral_horas = settings.UMBRAL_REPROGRAMACION_HORAS
     con_anticipacion = actividad_factory(
-        fecha_inicio=now + timedelta(days=10)
+        fecha_inicio=now + timedelta(days=limite_anticipacion + 1)
     )
     sin_anticipacion = actividad_factory(
-        fecha_inicio=now + timedelta(days=4)
+        fecha_inicio=now + timedelta(
+            days=max(limite_anticipacion - 1, 0), hours=1
+        )
     )
 
     assert clasificar_cambio_fecha(
@@ -113,12 +120,52 @@ def test_clasificar_cambio_fecha_aplica_limites_inclusivos(
     ) == "edicion_estandar"
     assert clasificar_cambio_fecha(
         sin_anticipacion,
-        sin_anticipacion.fecha_inicio + timedelta(hours=48),
+        sin_anticipacion.fecha_inicio
+        + timedelta(hours=max(umbral_horas, 1)),
         fecha_modificacion=now,
     ) == "cancelar_republicar"
     assert clasificar_cambio_fecha(
         sin_anticipacion,
-        sin_anticipacion.fecha_inicio + timedelta(hours=47, minutes=59),
+        sin_anticipacion.fecha_inicio
+        + timedelta(hours=max(umbral_horas - 1, 0), minutes=59),
+        fecha_modificacion=now,
+    ) == (
+        "reprogramacion"
+        if umbral_horas > 0
+        else "cancelar_republicar"
+    )
+
+
+def test_clasificar_cambio_fecha_en_limite_de_anticipacion(
+    actividad_factory,
+):
+    if settings.UMBRAL_ANTICIPACION_REPROGRAMACION_DIAS == 0:
+        pytest.skip("Un umbral de 0 días no permite probar el límite con fechas futuras.")
+    now = datetime.now(timezone.utc)
+    limite = settings.UMBRAL_ANTICIPACION_REPROGRAMACION_DIAS
+    actividad_en_limite = actividad_factory(
+        fecha_inicio=now + timedelta(days=limite)
+    )
+    actividad_fuera_del_limite = actividad_factory(
+        fecha_inicio=now + timedelta(days=limite, seconds=1)
+    )
+    actividad_dentro_del_limite = actividad_factory(
+        fecha_inicio=now + timedelta(days=limite, seconds=-1)
+    )
+
+    assert clasificar_cambio_fecha(
+        actividad_en_limite,
+        actividad_en_limite.fecha_inicio - timedelta(minutes=30),
+        fecha_modificacion=now,
+    ) == "edicion_estandar"
+    assert clasificar_cambio_fecha(
+        actividad_fuera_del_limite,
+        actividad_fuera_del_limite.fecha_inicio - timedelta(minutes=30),
+        fecha_modificacion=now,
+    ) == "edicion_estandar"
+    assert clasificar_cambio_fecha(
+        actividad_dentro_del_limite,
+        actividad_dentro_del_limite.fecha_inicio - timedelta(minutes=30),
         fecha_modificacion=now,
     ) == "reprogramacion"
 

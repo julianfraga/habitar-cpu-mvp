@@ -94,24 +94,69 @@ renuevan los accesos para la actividad nueva y se envía su roster vigente
 - Los fallos de SMTP se registran como fallos de entrega; no se considera
   enviado un correo que `send_email` no pudo entregar.
 
-## Persistencia y despliegue
+## Diagramas de flujo
 
-La migración `20261109_activity_rescheduling` agrega:
+### Edición de actividades
 
-- `actividades.reprogramada_corto_plazo`
-- `inscripciones.baja_penalizada`
-
-En una base existente, aplicar la migración antes de usar la aplicación:
-
-```bash
-alembic upgrade head
+```mermaid
+flowchart TD
+    A([Coordinación guarda cambios]) --> B{¿Cambió inicio de actividad?}
+    B -- No --> C[Actualizar los datos]
+    C --> D{¿Actividad publicada?}
+    D -- No --> E([Fin])
+    D -- Sí --> F[Notificar a inscriptos activos]
+    F --> E
+    B -- Sí --> G{¿Modificación con al menos el umbral de anticipación antes del inicio original?}
+    G -- Sí --> H[Edición estándar: conservar inscripciones y penalizaciones]
+    H --> I[Notificar cambios a inscriptos]
+    I --> E
+    G -- No --> J{¿Nuevo inicio a 48 horas o más del inicio original?}
+    J -- Sí --> K[Cancelar actividad original]
+    K --> L[Dar de baja inscriptos activos sin penalización]
+    L --> M[Crear actividad nueva sin inscripciones]
+    M --> N[Notificar a alumnos que deben anotarse de nuevo]
+    M --> O{¿El cierre anterior ya ocurrió?}
+    O -- Sí --> P[Invalidar QR y enlace anteriores; generar y enviar accesos nuevos]
+    O -- No --> E
+    P --> E
+    J -- No --> Q[Reprogramar misma actividad y conservar inscriptos]
+    Q --> R[Marcar reprogramación corta y revocar penalizaciones registradas]
+    R --> S[Notificar horario nuevo; bajas futuras sin penalización]
+    R --> T{¿El cierre anterior ya ocurrió?}
+    T -- Sí --> U[Mantener inscripción abierta hasta nuevo inicio y renovar accesos docentes]
+    T -- No --> V[Aplicar cierre ordinario configurable]
+    S --> E
+    U --> E
+    V --> E
 ```
 
-Los registros anteriores reciben `false` como valor inicial. No es posible
-determinar con seguridad a qué actividad corresponden las penalizaciones
-históricas del contador agregado del alumno; por eso no se eliminan ni se
-atribuyen retroactivamente. Desde la migración, cada penalización queda
-vinculada a una inscripción para impedir duplicaciones y permitir su revocación.
+### Bajas y créditos
+
+```mermaid
+flowchart TD
+    A([Alumno solicita baja]) --> B{¿Inscripción activa?}
+    B -- No --> C[Rechazar baja]
+    B -- Sí --> D{¿Actividad finalizada o asistencia validada?}
+    D -- Sí --> C
+    D -- No --> E{¿Quedan menos de MARGEN_BAJA_HORAS y no fue reprogramada a corto plazo?}
+    E -- Sí --> F[Registrar baja penalizada]
+    F --> G[Sumar 1 a créditos de penalización]
+    E -- No --> H[Registrar baja sin penalización]
+    G --> I[Créditos requeridos = base + penalización]
+    H --> J{¿Intenta reinscribirse en la misma actividad?}
+    I --> J
+    J -- Sí, baja penalizada y sin reprogramación --> K[Bloquear reinscripción]
+    J -- No --> L[Permitir reinscripción si hay cupo y está abierta]
+    M([Actividad se reprograma a corto plazo]) --> N[Por cada baja penalizada registrada: restar 1 y limpiar marca]
+    N --> O[Permitir reinscripción; futuras bajas no penalizan]
+    P([Asistencia validada]) --> Q{¿Encuesta obligatoria pendiente?}
+    Q -- Sí --> R[Mantener créditos de actividad pendientes]
+    R --> S[Al completar encuesta, acreditar créditos de actividad]
+    Q -- No --> T[Acreditar créditos de actividad]
+    S --> U[Sumar a créditos acreditados una sola vez]
+    T --> U
+```
+
 
 ## Pruebas
 

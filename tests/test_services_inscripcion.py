@@ -8,6 +8,7 @@ from app.models import (
     Inscripcion,
     Notification,
 )
+from app.config import settings
 from app.services.credits import required_credits
 from app.services.inscripcion import (
     EnrollError,
@@ -68,13 +69,17 @@ def test_inscribir_y_consultar_inscripcion(db_session, actividad_factory, user_f
 def test_inscripcion_cerrada_respeta_umbral_y_reprogramacion_corta(
     db_session, actividad_factory, user_factory
 ):
-    inicio = datetime.now(timezone.utc) + timedelta(minutes=30)
+    now = datetime.now(timezone.utc)
+    inicio = now + timedelta(hours=settings.CIERRE_INSCRIPCIONES_HORAS)
+    inicio_reprogramada = now + timedelta(
+        hours=max(settings.CIERRE_INSCRIPCIONES_HORAS / 2, 0.5)
+    )
     cerrada = actividad_factory(
         estado=ESTADO_PUBLICADA, fecha_inicio=inicio
     )
     reprogramada = actividad_factory(
         estado=ESTADO_PUBLICADA,
-        fecha_inicio=inicio,
+        fecha_inicio=inicio_reprogramada,
     )
     reprogramada.reprogramada_corto_plazo = True
     db_session.commit()
@@ -90,7 +95,8 @@ def test_inscribir_rechaza_actividad_con_inscripcion_cerrada(
 ):
     actividad = actividad_factory(
         estado=ESTADO_PUBLICADA,
-        fecha_inicio=datetime.now(timezone.utc) + timedelta(minutes=30),
+        fecha_inicio=datetime.now(timezone.utc)
+        + timedelta(hours=settings.CIERRE_INSCRIPCIONES_HORAS),
     )
     usuario = user_factory()
 
@@ -146,9 +152,13 @@ def test_unenroll_permite_reinscripcion(db_session, actividad_factory, user_fact
 
 @pytest.mark.parametrize(
     "hours_before, expected_penalty",
-    [(48, False), (24, False), (23, True)],
+    [
+        (settings.MARGEN_BAJA_HORAS * 2, False),
+        (settings.MARGEN_BAJA_HORAS, False),
+        (settings.MARGEN_BAJA_HORAS / 2, settings.MARGEN_BAJA_HORAS > 0),
+    ],
 )
-def test_unenroll_penaliza_solo_dentro_de_24_horas(
+def test_unenroll_penaliza_solo_dentro_del_margen_configurado(
     db_session, actividad_factory, user_factory, hours_before, expected_penalty
 ):
     now = datetime.now(timezone.utc)
@@ -180,7 +190,113 @@ def test_unenroll_penaliza_solo_dentro_de_24_horas(
     assert len(notifications) == (1 if expected_penalty else 0)
     if expected_penalty:
         assert "baja tardía" in notifications[0].mensaje
-        assert "menos de 24 horas" in notifications[0].mensaje
+        assert (
+            f"menos de {settings.MARGEN_BAJA_HORAS} horas"
+            in notifications[0].mensaje
+        )
+
+
+@pytest.mark.parametrize(
+    "hours_before_start, cancel, expected_penalty",
+    [
+        (
+            settings.MARGEN_BAJA_HORAS
+            + settings.CIERRE_INSCRIPCIONES_HORAS
+            + 1,
+            False,
+            False,
+        ),
+        (
+            settings.MARGEN_BAJA_HORAS
+            + settings.CIERRE_INSCRIPCIONES_HORAS
+            + 1,
+            True,
+            False,
+        ),
+        pytest.param(
+            (settings.MARGEN_BAJA_HORAS + settings.CIERRE_INSCRIPCIONES_HORAS)
+            / 2,
+            True,
+            True,
+            marks=pytest.mark.skipif(
+                settings.MARGEN_BAJA_HORAS
+                <= settings.CIERRE_INSCRIPCIONES_HORAS,
+                reason="No hay ventana configurable para inscribir y penalizar la baja.",
+            ),
+        ),
+    ],
+)
+def test_inscripcion_y_baja_alrededor_del_margen_configurado(
+    db_session,
+    actividad_factory,
+    user_factory,
+    hours_before_start,
+    cancel,
+    expected_penalty,
+):
+    now = datetime.now(timezone.utc)
+    actividad = actividad_factory(
+        estado=ESTADO_PUBLICADA,
+        fecha_inicio=now + timedelta(hours=hours_before_start),
+    )
+    usuario = user_factory()
+
+    inscribir(db_session, actividad.id, usuario.id)
+    penalizada = (
+        unenroll(db_session, actividad.id, usuario.id, now=now)
+        if cancel
+        else False
+    )
+
+    assert penalizada is expected_penalty
+    assert usuario.estudiante.creditos_penalizacion == (
+        1.0 if expected_penalty else 0.0
+    )
+    enrollment = db_session.query(Inscripcion).one()
+    assert enrollment.estado == (
+        INSCRIPCION_BAJA if cancel else INSCRIPCION_ALTA
+    )
+    assert enrollment.baja_penalizada is expected_penalty
+
+
+@pytest.mark.skipif(
+    settings.UMBRAL_ANTICIPACION_REPROGRAMACION_DIAS * 24
+    <= settings.CIERRE_INSCRIPCIONES_HORAS,
+    reason="La actividad quedaría dentro del cierre al momento de inscripción.",
+)
+@pytest.mark.skipif(
+    settings.MARGEN_BAJA_HORAS == 0,
+    reason="Con margen de baja en 0 horas no existe baja tardía penalizable.",
+)
+@pytest.mark.parametrize(
+    "days_before_start",
+    [
+        settings.UMBRAL_ANTICIPACION_REPROGRAMACION_DIAS,
+        settings.UMBRAL_ANTICIPACION_REPROGRAMACION_DIAS + 1,
+    ],
+)
+def test_actividad_creada_en_limite_y_un_dia_despues_mantiene_reglas_de_baja(
+    db_session, actividad_factory, user_factory, days_before_start
+):
+    now = datetime.now(timezone.utc)
+    actividad = actividad_factory(
+        estado=ESTADO_PUBLICADA,
+        fecha_inicio=now + timedelta(days=days_before_start),
+    )
+    usuario = user_factory()
+
+    inscribir(db_session, actividad.id, usuario.id)
+    momento_baja = actividad.fecha_inicio - timedelta(
+        hours=settings.MARGEN_BAJA_HORAS / 2
+    )
+    penalizada = unenroll(
+        db_session, actividad.id, usuario.id, now=momento_baja
+    )
+
+    db_session.refresh(usuario.estudiante)
+    assert not actividad.reprogramada_corto_plazo
+    assert penalizada
+    assert usuario.estudiante.creditos_penalizacion == 1.0
 
 
 def test_baja_penalizada_bloquea_reinscripcion_solo_en_esa_actividad(

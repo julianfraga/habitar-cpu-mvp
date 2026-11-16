@@ -4,6 +4,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import settings
 from app.database import get_db
 from app.main import app
 from app.models import ESTADO_PUBLICADA, INSCRIPCION_ALTA, Inscripcion
@@ -13,7 +14,11 @@ from app.services.inscripcion import inscribir
 
 @pytest.mark.parametrize(
     "hours_before, shows_warning",
-    [(48, False), (24.1, False), (23, True)],
+    [
+        (settings.MARGEN_BAJA_HORAS * 2 + 1, False),
+        (settings.MARGEN_BAJA_HORAS, False),
+        (max(settings.MARGEN_BAJA_HORAS - 1, 0.5), settings.MARGEN_BAJA_HORAS > 0),
+    ],
 )
 def test_activity_detail_warns_before_penalized_cancellation(
     db_session,
@@ -69,7 +74,8 @@ def test_closed_enrollment_disables_registration_and_shows_badge(
     user.debe_cambiar_pw = False
     activity = actividad_factory(
         estado=ESTADO_PUBLICADA,
-        fecha_inicio=datetime.now(timezone.utc) + timedelta(minutes=30),
+        fecha_inicio=datetime.now(timezone.utc)
+        + timedelta(hours=settings.CIERRE_INSCRIPCIONES_HORAS),
         carreras=[carrera],
     )
     db_session.commit()

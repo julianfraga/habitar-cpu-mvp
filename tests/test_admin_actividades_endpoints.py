@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import settings
 from app.database import get_db
 from app.main import app
 from app.models import (
@@ -313,13 +314,24 @@ def test_finalized_activity_panel_shows_inscriptions_attendance_and_duplicate_ac
     assert "inscripto@example.com" in inscriptos_response.text
 
 
+@pytest.mark.skipif(
+    settings.CIERRE_INSCRIPCIONES_HORAS == 0,
+    reason="Con cierre en 0 horas no existe un intervalo antes del inicio con inscripción cerrada.",
+)
+@pytest.mark.skipif(
+    settings.UMBRAL_ANTICIPACION_REPROGRAMACION_DIAS == 0,
+    reason="Un umbral de 0 días clasifica toda actividad futura como edición estándar.",
+)
 def test_update_after_close_reprograms_and_refreshes_teacher_access(
     admin_actividades_client, user_factory, monkeypatch
 ):
     from app.services import asistencia
 
     client, db_session, docente, carrera = admin_actividades_client
-    inicio_anterior = datetime.now(timezone.utc) + timedelta(minutes=25)
+    ahora = datetime.now(timezone.utc)
+    inicio_anterior = ahora + timedelta(
+        hours=settings.CIERRE_INSCRIPCIONES_HORAS / 2
+    )
     actividad = Actividad(
         titulo="Actividad próxima",
         descripcion="Descripción",
@@ -353,7 +365,9 @@ def test_update_after_close_reprograms_and_refreshes_teacher_access(
     )
     monkeypatch.setattr(asistencia, "send_email", lambda *args, **kwargs: True)
 
-    fecha_nueva = datetime.now(timezone.utc) + timedelta(minutes=20)
+    fecha_nueva = ahora + timedelta(
+        hours=settings.CIERRE_INSCRIPCIONES_HORAS / 3
+    )
     data = actividad_form_data(docente.docente_id, carrera.id)
     data["fecha_inicio"] = to_local_datetime(fecha_nueva).strftime(
         "%Y-%m-%dT%H:%M"
@@ -374,12 +388,69 @@ def test_update_after_close_reprograms_and_refreshes_teacher_access(
     assert not ventana.cerrada_manualmente
 
 
-def test_update_at_48_hours_cancels_and_creates_new_activity(
+def test_update_beyond_anticipation_threshold_keeps_standard_enrollment(
     admin_actividades_client, user_factory
 ):
     client, db_session, docente, carrera = admin_actividades_client
+    inicio_anterior = datetime.now(timezone.utc) + timedelta(
+        days=settings.UMBRAL_ANTICIPACION_REPROGRAMACION_DIAS + 1
+    )
+    actividad = Actividad(
+        titulo="Actividad con anticipación",
+        descripcion="Descripción",
+        tipo="presencial",
+        fecha_inicio=inicio_anterior,
+        fecha_fin=inicio_anterior + timedelta(hours=2),
+        lugar="Campus",
+        cupo_max=30,
+        estado=ESTADO_PUBLICADA,
+        docentes=[docente.docente],
+        carreras_asociadas=[carrera],
+    )
+    estudiante = user_factory()
+    db_session.add(actividad)
+    db_session.commit()
+    db_session.add(
+        Inscripcion(
+            actividad_id=actividad.id,
+            user_id=estudiante.id,
+            estado=INSCRIPCION_ALTA,
+        )
+    )
+    db_session.commit()
+
+    fecha_nueva = inicio_anterior - timedelta(minutes=30)
+    data = actividad_form_data(docente.docente_id, carrera.id)
+    data["fecha_inicio"] = to_local_datetime(fecha_nueva).strftime(
+        "%Y-%m-%dT%H:%M"
+    )
+    data["fecha_fin"] = to_local_datetime(
+        fecha_nueva + timedelta(hours=2)
+    ).strftime("%Y-%m-%dT%H:%M")
+    response = client.post(f"/admin/actividades/{actividad.id}", data=data)
+
+    db_session.refresh(actividad)
+    assert response.status_code == 303
+    assert actividad.estado == ESTADO_PUBLICADA
+    assert not actividad.reprogramada_corto_plazo
+    assert db_session.query(Inscripcion).one().estado == INSCRIPCION_ALTA
+
+
+@pytest.mark.skipif(
+    settings.UMBRAL_ANTICIPACION_REPROGRAMACION_DIAS == 0,
+    reason="Un umbral de 0 días no permite cancelar/republicar una actividad futura.",
+)
+def test_update_after_rescheduling_threshold_cancels_and_creates_new_activity(
+    admin_actividades_client, user_factory
+):
+    client, db_session, docente, carrera = admin_actividades_client
+    tiempo_anticipacion = timedelta(
+        days=settings.UMBRAL_ANTICIPACION_REPROGRAMACION_DIAS
+    ) - timedelta(hours=1)
+    if tiempo_anticipacion <= timedelta(0):
+        tiempo_anticipacion = timedelta(hours=1)
     inicio_anterior = (
-        datetime.now(timezone.utc) + timedelta(days=2)
+        datetime.now(timezone.utc) + tiempo_anticipacion
     ).replace(second=0, microsecond=0)
     actividad = Actividad(
         titulo="Actividad anterior",
@@ -405,7 +476,9 @@ def test_update_at_48_hours_cancels_and_creates_new_activity(
     )
     db_session.commit()
 
-    fecha_nueva = inicio_anterior + timedelta(hours=48)
+    fecha_nueva = inicio_anterior + timedelta(
+        hours=max(settings.UMBRAL_REPROGRAMACION_HORAS, 1)
+    )
     data = actividad_form_data(docente.docente_id, carrera.id)
     data["fecha_inicio"] = to_local_datetime(fecha_nueva).strftime(
         "%Y-%m-%dT%H:%M"
@@ -427,6 +500,77 @@ def test_update_at_48_hours_cancels_and_creates_new_activity(
     )
     assert db_session.query(Inscripcion).one().estado != INSCRIPCION_ALTA
     assert nueva.inscripciones == []
+
+
+def test_update_to_threshold_plus_one_hours_uses_configured_rescheduling_threshold(
+    admin_actividades_client, user_factory
+):
+    client, db_session, docente, carrera = admin_actividades_client
+    ahora = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    inicio_anterior = ahora + timedelta(hours=settings.UMBRAL_ANTICIPACION_REPROGRAMACION_DIAS//2)
+    actividad = Actividad(
+        titulo="Actividad a reprogramar",
+        descripcion="Descripción",
+        tipo="presencial",
+        fecha_inicio=inicio_anterior,
+        fecha_fin=inicio_anterior + timedelta(hours=2),
+        lugar="Campus",
+        cupo_max=30,
+        estado=ESTADO_PUBLICADA,
+        docentes=[docente.docente],
+        carreras_asociadas=[carrera],
+    )
+    estudiante = user_factory()
+    db_session.add(actividad)
+    db_session.commit()
+    db_session.add(
+        Inscripcion(
+            actividad_id=actividad.id,
+            user_id=estudiante.id,
+            estado=INSCRIPCION_ALTA,
+        )
+    )
+    db_session.commit()
+
+    fecha_nueva = inicio_anterior + timedelta(hours=settings.UMBRAL_REPROGRAMACION_HORAS+1)
+    data = actividad_form_data(docente.docente_id, carrera.id)
+    data["fecha_inicio"] = to_local_datetime(fecha_nueva).strftime(
+        "%Y-%m-%dT%H:%M"
+    )
+    data["fecha_fin"] = to_local_datetime(
+        fecha_nueva + timedelta(hours=2)
+    ).strftime("%Y-%m-%dT%H:%M")
+    response = client.post(f"/admin/actividades/{actividad.id}", data=data)
+
+    db_session.refresh(actividad)
+    inscripcion = db_session.query(Inscripcion).one()
+    nueva = db_session.query(Actividad).filter(
+        Actividad.id != actividad.id
+    ).first()
+    assert response.status_code == 303
+    horas_entre_fechas = (
+        fecha_nueva - inicio_anterior
+    ).total_seconds() / 3600
+    if settings.UMBRAL_ANTICIPACION_REPROGRAMACION_DIAS == 0:
+        assert actividad.estado == ESTADO_PUBLICADA
+        assert not actividad.reprogramada_corto_plazo
+        assert inscripcion.estado == INSCRIPCION_ALTA
+        assert nueva is None
+    elif settings.UMBRAL_REPROGRAMACION_HORAS <= horas_entre_fechas:
+        assert actividad.estado == ESTADO_CANCELADA
+        assert nueva is not None
+        assert nueva.estado == ESTADO_PUBLICADA
+        assert inscripcion.estado != INSCRIPCION_ALTA
+        assert not inscripcion.baja_penalizada
+        assert nueva.fecha_inicio == fecha_nueva.replace(
+            second=0, microsecond=0, tzinfo=None
+        )
+        assert nueva.inscripciones == []
+    else:
+        assert actividad.estado == ESTADO_PUBLICADA
+        assert actividad.reprogramada_corto_plazo
+        assert inscripcion.estado == INSCRIPCION_ALTA
+        assert nueva is None
 
 
 def test_cancelled_activity_edit_prefills_associated_careers(
