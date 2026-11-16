@@ -153,7 +153,7 @@ def actualizar_creditos_requeridos(
     if estudiante is None or estudiante.rol != ROL_ESTUDIANTE or estudiante.estudiante is None:
         raise HTTPException(status_code=404, detail="Estudiante no encontrado.")
 
-    estudiante.estudiante.creditos_requeridos = float(payload.creditos_requeridos)
+    estudiante.estudiante.creditos_requeridos = payload.creditos_requeridos
     db.commit()
     db.refresh(estudiante)
     return {
@@ -162,5 +162,5 @@ def actualizar_creditos_requeridos(
         "nombre": estudiante.nombre,
         "apellido": estudiante.apellido,
         "carrera_id": estudiante.carrera_id,
-        "creditos_requeridos": estudiante.estudiante.creditos_requeridos,
+        "creditos_requeridos": float(estudiante.estudiante.creditos_requeridos),
     }

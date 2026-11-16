@@ -13,10 +13,10 @@ class Mensaje(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     remitente_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     destinatario_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     reply_to_id: Mapped[int | None] = mapped_column(
         ForeignKey("mensajes.id", ondelete="SET NULL"), nullable=True, index=True
@@ -42,7 +42,7 @@ class MensajeLectura(Base):
         ForeignKey("mensajes.id", ondelete="CASCADE"), primary_key=True
     )
     user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True
     )
     leido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     leido_at: Mapped[datetime] = mapped_column(

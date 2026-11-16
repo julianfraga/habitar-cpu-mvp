@@ -1,6 +1,8 @@
 """Credits & progress service (E-07)."""
 from __future__ import annotations
 
+from decimal import Decimal
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -12,16 +14,16 @@ from app.models import (
 )
 
 
-def required_credits(db: Session, user_id: int) -> float:
+def required_credits(db: Session, user_id: int) -> Decimal:
     estudiante = db.get(Estudiante, user_id)
     if estudiante is None:
-        return 0.0
+        return Decimal("0")
     return estudiante.creditos_requeridos + estudiante.creditos_penalizacion
 
 
-def accumulated_credits(db: Session, user_id: int) -> float:
+def accumulated_credits(db: Session, user_id: int) -> Decimal:
     estudiante = db.get(Estudiante, user_id)
-    return estudiante.creditos_acreditados if estudiante else 0.0
+    return estudiante.creditos_acreditados if estudiante else Decimal("0")
 
 
 def completed_actividades(db: Session, user_id: int) -> list[tuple[Actividad, object]]:
@@ -61,7 +63,7 @@ def progress(db: Session, user_id: int) -> dict:
         )
         .scalar()
     )
-    pending = float(pending or 0)
+    pending = pending or Decimal("0")
     pending_pct = min(round(pending / req * 100), 100 - pct) if req else 0
     return {
         "accumulated": acc,

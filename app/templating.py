@@ -9,6 +9,7 @@ from fastapi import Request
 from fastapi.responses import RedirectResponse
 
 from app.config import settings
+from app.models.enums import TODAS_LAS_CARRERAS_STRING
 from app.services.parsing import to_local_datetime
 from app.services.notifications import unread_count
 
@@ -29,6 +30,7 @@ templates.env.filters["fmt_creditos"] = lambda value: format(
     Decimal(str(value)).normalize(), "f"
 )
 templates.env.globals["app_name"] = settings.APP_NAME
+templates.env.globals["TODAS_LAS_CARRERAS_STRING"] = TODAS_LAS_CARRERAS_STRING
 
 
 def build_sort_links(

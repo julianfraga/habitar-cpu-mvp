@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -16,18 +16,33 @@ from app.models.enums import ROL_ESTUDIANTE
 
 class User(Base):
     __tablename__ = "users"
-    __table_args__ = (UniqueConstraint("persona_id", name="uq_users_persona_id"),)
+    __table_args__ = (
+        CheckConstraint(
+            "rol IN ('estudiante', 'coordinacion', 'docente', 'director')",
+            name="ck_users_rol_valido",
+        ),
+        UniqueConstraint("persona_id", name="uq_users_persona_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    persona_id: Mapped[int] = mapped_column(ForeignKey("personas.id"), nullable=False)
+    persona_id: Mapped[int] = mapped_column(
+        ForeignKey("personas.id", ondelete="RESTRICT"), nullable=False
+    )
     pw_hash: Mapped[str] = mapped_column(String(255))
-    debe_cambiar_pw: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    debe_cambiar_pw: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False, server_default=text("true")
+    )
 
     persona: Mapped["Persona"] = relationship(back_populates="usuario", uselist=False)
     estudiante: Mapped["Estudiante | None"] = relationship(
-        back_populates="user", uselist=False, cascade="all, delete-orphan"
+        back_populates="user", uselist=False, passive_deletes="all"
     )
-    rol: Mapped[str] = mapped_column(String(20), default=ROL_ESTUDIANTE, index=True)
+    rol: Mapped[str] = mapped_column(
+        String(20),
+        default=ROL_ESTUDIANTE,
+        server_default=text(f"'{ROL_ESTUDIANTE.value}'"),
+        index=True,
+    )
 
     @property
     def nombre_completo(self) -> str:

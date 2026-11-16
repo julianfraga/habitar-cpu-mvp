@@ -22,9 +22,9 @@
     <label class="type-caption weight-semibold text-muted uppercase tracking-wider">Filtrar por Carreras:</label>
     
     <div class="flex flex-wrap items-center gap-3">
-      <select id="carrera-select" class="border-width border-soft radius-control type-body-small px-3 py-2 surface-page focus:surface-card focus-no-outline focus:focus-ring-width focus-ring-brand transition-layout min-width-medium">
+      <select id="carrera-select" data-all-careers-value="{{ TODAS_LAS_CARRERAS_STRING }}" class="border-width border-soft radius-control type-body-small px-3 py-2 surface-page focus:surface-card focus-no-outline focus:focus-ring-width focus-ring-brand transition-layout min-width-medium">
         <option value="">-- Seleccionar carrera para filtrar --</option>
-        <option value="todas">-- TODAS LAS CARRERAS --</option>
+        <option value="{{ TODAS_LAS_CARRERAS_STRING }}">-- TODAS LAS CARRERAS --</option>
         {% for carrera in lista_carreras %}
           <option value="{{ carrera.id }}" data-nombre="{{ carrera.tipo.nombre }} {{ carrera.nombre }}">
             {{ carrera.tipo.nombre }} {{ carrera.nombre }}

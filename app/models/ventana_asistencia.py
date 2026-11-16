@@ -16,7 +16,7 @@ class VentanaAsistencia(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     actividad_id: Mapped[int] = mapped_column(
-        ForeignKey("actividades.id", ondelete="CASCADE"), index=True
+        ForeignKey("actividades.id", ondelete="CASCADE")
     )
     codigo: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     codigo_cierre: Mapped[str] = mapped_column(String(128), unique=True, index=True)

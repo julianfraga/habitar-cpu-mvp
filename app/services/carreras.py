@@ -2,7 +2,11 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session,contains_eager
 from app.models import Carrera, Estudiante, TipoCarrera, User
-from app.models.enums import ESTADO_BORRADOR, ROL_ESTUDIANTE
+from app.models.enums import (
+    ESTADO_BORRADOR,
+    ROL_ESTUDIANTE,
+    TODAS_LAS_CARRERAS_STRING,
+)
 
 def _obtener_y_validar_tipo_id(
     db: Session, 
@@ -123,13 +127,12 @@ def update(
 
 def get_carreras_desde_dropdown(carreras_input: list[str], db: Session) -> list[Carrera]:
     """
-    Convierte la entrada enviada por un Form (ej: ["1", "3"] o ["todas"]) 
-    en una lista de instancias del modelo Carrera de SQLAlchemy.
+    Convierte la entrada enviada por un Form en instancias del modelo Carrera.
     """
     if not carreras_input:
         return []
 
-    if "todas" in carreras_input:
+    if TODAS_LAS_CARRERAS_STRING in carreras_input:
         return db.query(Carrera).all()
 
     carreras_ids = [int(c_id) for c_id in carreras_input]

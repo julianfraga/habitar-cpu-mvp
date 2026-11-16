@@ -13,6 +13,7 @@ from app.models import (
     Inscripcion,
     Persona,
     RespuestaEncuesta,
+    TODAS_LAS_CARRERAS_STRING,
 )
 from app.services.actividades import (
     ActividadContext,
@@ -237,7 +238,12 @@ def test_list_all_filtra_carreras_y_acepta_todas(db_session, actividad_factory, 
     sin_carrera = actividad_factory(carreras=[diseno])
 
     assert list_all(db_session, carreras_ids=[str(arquitectura.id)]) == [con_carrera]
-    assert {a.id for a in list_all(db_session, carreras_ids=["todas"])} == {
+    assert {
+        a.id
+        for a in list_all(
+            db_session, carreras_ids=[TODAS_LAS_CARRERAS_STRING]
+        )
+    } == {
         con_carrera.id,
         sin_carrera.id,
     }

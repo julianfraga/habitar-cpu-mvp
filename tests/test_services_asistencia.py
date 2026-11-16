@@ -19,6 +19,7 @@ from app.services.asistencia import (
     cerrar_ventana_asistencia,
     asegurar_ventana_asistencia,
     mark_present_manual,
+    mark_present_manual,
     present_user_ids,
     acreditar_creditos_pendientes,
 )
@@ -138,7 +139,6 @@ def test_renovar_accesos_revoca_qr_y_enlace_y_reenvia_datos_docentes(
             actividad_id=activity.id,
             token="old-session-token",
             expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
-            created_by=teacher.id,
         )
     )
     window.cerrada_manualmente = True
@@ -192,8 +192,36 @@ def test_check_in_registra_asistencia_para_usuario_inscripto(
 
     assert resultado.id == actividad.id
     assert present_user_ids(db_session, actividad.id) == {estudiante.id}
-    assert db_session.query(Asistencia).one().validated_by is None
+    assert db_session.query(Asistencia).one().validated_by == estudiante.id
     assert accumulated_credits(db_session, estudiante.id) == actividad.creditos
+
+
+def test_manual_attendance_records_authorized_validator(
+    db_session, actividad_factory, user_factory
+):
+    activity = actividad_factory(estado=ESTADO_PUBLICADA)
+    teacher = user_factory(rol="docente")
+    student = user_factory()
+    activity.docentes.append(teacher.docente)
+    inscribir(db_session, activity.id, student.id)
+    db_session.commit()
+
+    mark_present_manual(db_session, activity.id, student.id, teacher.id)
+
+    attendance = db_session.query(Asistencia).one()
+    assert attendance.validated_by == teacher.id
+
+
+def test_manual_attendance_rejects_student_as_validator(
+    db_session, actividad_factory, user_factory
+):
+    activity = actividad_factory(estado=ESTADO_PUBLICADA)
+    student = user_factory()
+    inscribir(db_session, activity.id, student.id)
+    db_session.commit()
+
+    with pytest.raises(AsistenciaError, match="validador debe ser coordinación"):
+        mark_present_manual(db_session, activity.id, student.id, student.id)
 
 
 def test_check_in_rechaza_codigo_valido_antes_de_30_minutos_del_inicio(

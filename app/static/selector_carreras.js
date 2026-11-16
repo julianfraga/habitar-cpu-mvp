@@ -3,6 +3,7 @@ function initializeCareerSelector() {
   const tagsContainer = document.getElementById("carreras-tags-container");
   const hiddenInputsContainer = document.getElementById("carreras-hidden-inputs");
   const emptyMsg = document.getElementById("carreras-empty-msg");
+  const allCareersValue = select?.dataset.allCareersValue;
 
   if (!select || !tagsContainer || !hiddenInputsContainer) return;
   if (select.dataset.careerSelectorInitialized === "true") return;
@@ -30,10 +31,10 @@ function initializeCareerSelector() {
       return;
     }
 
-    if (value === "todas") {
+    if (value === allCareersValue) {
       Array.from(selectedValues).forEach((v) => removeTag(v, isInitializing));
-    } else if (selectedValues.has("todas")) {
-      removeTag("todas", isInitializing);
+    } else if (selectedValues.has(allCareersValue)) {
+      removeTag(allCareersValue, isInitializing);
     }
 
     selectedValues.add(value);
@@ -94,7 +95,7 @@ function initializeCareerSelector() {
 
     const selectedOption = e.target.options[e.target.selectedIndex];
     const label =
-      val === "todas"
+      val === allCareersValue
         ? "TODAS LAS CARRERAS"
         : selectedOption.getAttribute("data-nombre") || selectedOption.text;
 

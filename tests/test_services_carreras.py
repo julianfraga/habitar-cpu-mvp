@@ -1,6 +1,6 @@
 import pytest
 
-from app.models import Carrera, ESTADO_BORRADOR
+from app.models import Carrera, ESTADO_BORRADOR, TODAS_LAS_CARRERAS_STRING
 from app.services.carreras import (
     add,
     get_carreras,
@@ -153,7 +153,7 @@ def test_resolver_carreras_con_todas_devuelve_todas(db_session):
     arquitectura = add(db_session, "Arquitectura", creditos_requeridos=10, tipo_id=1)
     diseño = add(db_session, "Diseño", creditos_requeridos=15, tipo_id=2)
 
-    carreras = get_carreras_desde_dropdown(["todas"], db_session)
+    carreras = get_carreras_desde_dropdown([TODAS_LAS_CARRERAS_STRING], db_session)
 
     assert {carrera.id for carrera in carreras} == {arquitectura.id, diseño.id}
 

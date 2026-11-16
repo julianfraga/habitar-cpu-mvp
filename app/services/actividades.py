@@ -23,6 +23,7 @@ from app.models import (
     Persona,
     RespuestaEncuesta,
 )
+from app.models.enums import TODAS_LAS_CARRERAS_STRING
 from app.services.parsing import (
     formatear_duracion,
     parse_intervalo_tiempo,
@@ -126,6 +127,11 @@ def crear_contexto_actividad(
     db: Session,
     actividad: Actividad | None = None,
 ) -> ActividadContext:
+    if form.cupo_max < 1:
+        raise ValueError("El cupo máximo debe ser al menos 1.")
+    if form.tipo not in {"presencial", "virtual"}:
+        raise ValueError("El tipo de actividad no es válido.")
+
     try:
         inicio, fin = parse_intervalo_tiempo(
             form.fecha_inicio,
@@ -411,7 +417,7 @@ def list_all(
     direccion: str | None = None,
 ) -> list[Actividad]:
     stmt = select(Actividad)
-    if carreras_ids and "todas" not in carreras_ids:
+    if carreras_ids and TODAS_LAS_CARRERAS_STRING not in carreras_ids:
         ids = [int(cid) for cid in carreras_ids if cid.isdigit()]
         if ids:
             stmt = stmt.filter(Actividad.carreras_asociadas.any(Carrera.id.in_(ids)))

@@ -37,8 +37,16 @@ def test_accumulated_and_completed_actividades(db_session, actividad_factory, us
     segunda = actividad_factory(titulo="Segunda", creditos=5)
     db_session.add_all(
         [
-            Asistencia(actividad_id=primera.id, user_id=estudiante.id),
-            Asistencia(actividad_id=segunda.id, user_id=estudiante.id),
+            Asistencia(
+                actividad_id=primera.id,
+                user_id=estudiante.id,
+                validated_by=estudiante.id,
+            ),
+            Asistencia(
+                actividad_id=segunda.id,
+                user_id=estudiante.id,
+                validated_by=estudiante.id,
+            ),
         ]
     )
     db_session.commit()
@@ -59,7 +67,13 @@ def test_progress_calcula_porcentaje_y_limita_a_cien(
     estudiante.estudiante.creditos_requeridos = 5.0
     estudiante.estudiante.creditos_acreditados = 8.0
     actividad = actividad_factory(creditos=8)
-    db_session.add(Asistencia(actividad_id=actividad.id, user_id=estudiante.id))
+    db_session.add(
+        Asistencia(
+            actividad_id=actividad.id,
+            user_id=estudiante.id,
+            validated_by=estudiante.id,
+        )
+    )
     db_session.commit()
 
     assert progress(db_session, estudiante.id) == {
@@ -98,6 +112,7 @@ def test_progress_includes_credits_pending_survey(
         Asistencia(
             actividad_id=actividad.id,
             user_id=estudiante.id,
+            validated_by=estudiante.id,
             estado_creditos=ESTADO_CREDITOS_PENDIENTE_ENCUESTA,
         )
     )

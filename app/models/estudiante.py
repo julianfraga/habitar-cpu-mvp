@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from sqlalchemy import CheckConstraint, Float, ForeignKey, text
+from decimal import Decimal
+
+from sqlalchemy import CheckConstraint, ForeignKey, Numeric, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 from typing import TYPE_CHECKING
@@ -15,28 +17,49 @@ class Estudiante(Base):
         CheckConstraint("creditos_acreditados >= 0", name="ck_estudiante_creditos_acreditados"),
         CheckConstraint("creditos_requeridos > 0", name="ck_estudiante_creditos_requeridos"),
         CheckConstraint("creditos_penalizacion >= 0", name="ck_estudiante_creditos_penalizacion"),
+        CheckConstraint(
+            "creditos_acreditados * 2 = CAST(creditos_acreditados * 2 AS INTEGER)",
+            name="ck_estudiante_creditos_acreditados_medio",
+        ),
+        CheckConstraint(
+            "creditos_requeridos * 2 = CAST(creditos_requeridos * 2 AS INTEGER)",
+            name="ck_estudiante_creditos_requeridos_medio",
+        ),
+        CheckConstraint(
+            "creditos_penalizacion * 2 = CAST(creditos_penalizacion * 2 AS INTEGER)",
+            name="ck_estudiante_creditos_penalizacion_medio",
+        ),
     )
 
     user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+        ForeignKey("users.id", ondelete="RESTRICT"), primary_key=True
     )
     carrera_id: Mapped[int | None] = mapped_column(
         ForeignKey("carreras.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    creditos_acreditados: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0, server_default=text("0")
+    creditos_acreditados: Mapped[Decimal] = mapped_column(
+        Numeric(8, 1),
+        nullable=False,
+        default=Decimal("0"),
+        server_default=text("0"),
     )
-    creditos_requeridos: Mapped[float] = mapped_column(
-        Float, nullable=False, default=10.0, server_default=text("10")
+    creditos_requeridos: Mapped[Decimal] = mapped_column(
+        Numeric(8, 1),
+        nullable=False,
+        default=Decimal("10"),
+        server_default=text("10"),
     )
-    creditos_penalizacion: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0, server_default=text("0")
+    creditos_penalizacion: Mapped[Decimal] = mapped_column(
+        Numeric(8, 1),
+        nullable=False,
+        default=Decimal("0"),
+        server_default=text("0"),
     )
 
     user: Mapped["User"] = relationship(back_populates="estudiante")
     carrera: Mapped["Carrera | None"] = relationship(back_populates="estudiantes")
     respuestas_encuesta: Mapped[list["RespuestaEncuesta"]] = relationship(
-        back_populates="estudiante", cascade="all, delete-orphan"
+        back_populates="estudiante", passive_deletes="all"
     )
 
     @property

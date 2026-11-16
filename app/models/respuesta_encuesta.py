@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, JSON, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -16,6 +16,10 @@ if TYPE_CHECKING:
 class RespuestaEncuesta(Base):
     __tablename__ = "respuestas_encuesta"
     __table_args__ = (
+        CheckConstraint(
+            "rating BETWEEN 1 AND 5",
+            name="ck_respuestas_encuesta_rating_range",
+        ),
         Index(
             "uq_respuesta_actividad_estudiante",
             "actividad_id",
@@ -26,10 +30,10 @@ class RespuestaEncuesta(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     actividad_id: Mapped[int] = mapped_column(
-        ForeignKey("actividades.id", ondelete="CASCADE"), index=True
+        ForeignKey("actividades.id", ondelete="RESTRICT")
     )
     estudiante_id: Mapped[int] = mapped_column(
-        ForeignKey("estudiantes.user_id", ondelete="CASCADE")
+        ForeignKey("estudiantes.user_id", ondelete="RESTRICT")
     )
     respuestas: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False)
     rating: Mapped[int] = mapped_column(Integer, nullable=False)

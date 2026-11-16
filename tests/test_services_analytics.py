@@ -19,7 +19,13 @@ def test_overview_calcula_totales_y_tasa(db_session, actividad_factory, user_fac
     actividad_factory(estado="borrador")
     usuario = user_factory()
     db_session.add(Inscripcion(actividad_id=publicada.id, user_id=usuario.id))
-    db_session.add(Asistencia(actividad_id=publicada.id, user_id=usuario.id))
+    db_session.add(
+        Asistencia(
+            actividad_id=publicada.id,
+            user_id=usuario.id,
+            validated_by=usuario.id,
+        )
+    )
     db_session.commit()
 
     assert overview(db_session) == {
@@ -64,7 +70,11 @@ def test_asistencia_per_actividad_omite_sin_inscriptos_y_calcula_rate(
         [
             Inscripcion(actividad_id=con_datos.id, user_id=usuarios[0].id),
             Inscripcion(actividad_id=con_datos.id, user_id=usuarios[1].id),
-            Asistencia(actividad_id=con_datos.id, user_id=usuarios[0].id),
+            Asistencia(
+                actividad_id=con_datos.id,
+                user_id=usuarios[0].id,
+                validated_by=usuarios[0].id,
+            ),
         ]
     )
     db_session.commit()
@@ -122,7 +132,11 @@ def test_actividad_detalle_reune_conteos_duracion_y_respuestas(
                 user_id=otro.id,
                 estado=INSCRIPCION_BAJA,
             ),
-            Asistencia(actividad_id=actividad.id, user_id=estudiante.id),
+            Asistencia(
+                actividad_id=actividad.id,
+                user_id=estudiante.id,
+                validated_by=estudiante.id,
+            ),
             RespuestaEncuesta(
                 actividad_id=actividad.id,
                 estudiante_id=estudiante.id,

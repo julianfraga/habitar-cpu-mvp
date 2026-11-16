@@ -18,14 +18,22 @@ if TYPE_CHECKING:
 class Persona(Base):
     __tablename__ = "personas"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     nombre: Mapped[str] = mapped_column(String(120), nullable=False)
     apellido: Mapped[str] = mapped_column(String(120), nullable=False)
-    email: Mapped[str | None] = mapped_column(String(120), nullable=True, unique=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    email: Mapped[str | None] = mapped_column(String(254), nullable=True, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
 
-    usuario: Mapped["User | None"] = relationship(back_populates="persona", uselist=False)
-    docente: Mapped["Docente | None"] = relationship(back_populates="persona", uselist=False)
+    usuario: Mapped["User | None"] = relationship(
+        back_populates="persona", uselist=False, passive_deletes="all"
+    )
+    docente: Mapped["Docente | None"] = relationship(
+        back_populates="persona", uselist=False, passive_deletes="all"
+    )
 
     @property
     def nombre_completo(self) -> str:

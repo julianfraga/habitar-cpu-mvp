@@ -435,6 +435,7 @@ def test_my_actividades_filtra_publicadas_y_ordena(db_session, actividad_factory
     futura = actividad_factory(estado=ESTADO_PUBLICADA)
     borrador = actividad_factory(estado="borrador")
     futura.fecha_inicio = datetime.now(timezone.utc) + timedelta(days=2)
+    futura.fecha_fin = futura.fecha_inicio + timedelta(hours=2)
     inscribir(db_session, futura.id, usuario.id)
     db_session.add(
         Inscripcion(actividad_id=borrador.id, user_id=usuario.id, estado=INSCRIPCION_ALTA)

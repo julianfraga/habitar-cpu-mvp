@@ -2,6 +2,7 @@
 from __future__ import annotations
 import io
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 from fastapi import UploadFile
 import pandas as pd
@@ -113,7 +114,7 @@ def unenroll(
     enr.estado = INSCRIPCION_BAJA
     if penalizar:
         enr.baja_penalizada = True
-        estudiante.creditos_penalizacion += 1.0
+        estudiante.creditos_penalizacion += Decimal("1")
         notify(
             db,
             user,
@@ -163,7 +164,7 @@ def _revocar_penalizacion(db: Session, inscripcion: Inscripcion) -> None:
             "No se encontró el registro del estudiante para revocar su penalización."
         )
     estudiante.creditos_penalizacion = max(
-        estudiante.creditos_penalizacion - 1.0, 0.0
+        estudiante.creditos_penalizacion - Decimal("1"), Decimal("0")
     )
     inscripcion.baja_penalizada = False
 

@@ -17,9 +17,9 @@ class Docente(Base):
     __tablename__ = "docentes"
     __table_args__ = (UniqueConstraint("persona_id", name="uq_docentes_persona_id"),)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     persona_id: Mapped[int] = mapped_column(
-        ForeignKey("personas.id"), nullable=False
+        ForeignKey("personas.id", ondelete="RESTRICT"), nullable=False
     )
     #usuarios: Mapped[list[User]] = relationship(back_populates="docente")
     actividades: Mapped[list[Actividad]] = relationship(

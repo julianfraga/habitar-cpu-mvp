@@ -57,10 +57,11 @@
 
         <select
           id="carrera-select"
+          data-all-careers-value="{{ TODAS_LAS_CARRERAS_STRING }}"
           class="w-full border-width radius-control px-3 py-2 surface-card"
         >
           <option value="">-- Seleccionar carrera para agregar --</option>
-          <option value="todas">-- TODAS LAS CARRERAS --</option>
+          <option value="{{ TODAS_LAS_CARRERAS_STRING }}">-- TODAS LAS CARRERAS --</option>
 
           {% for carrera in lista_carreras %}
             <option

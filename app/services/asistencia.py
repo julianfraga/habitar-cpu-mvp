@@ -6,6 +6,7 @@ import io
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 
 import qrcode
@@ -25,6 +26,7 @@ from app.models import (
     ESTADO_PUBLICADA,
     INSCRIPCION_ALTA,
     ROL_COORDINACION,
+    ROL_DOCENTE,
     ROL_ESTUDIANTE,
     SesionAsistencia,
 )
@@ -53,7 +55,7 @@ def puede_gestionar_actividad(actividad: Actividad, user: User) -> bool:
         
     
 def _acreditar_creditos(
-    db: Session, actividad_id: int, user_id: int, cantidad: float
+    db: Session, actividad_id: int, user_id: int, cantidad: Decimal
 ) -> bool:
     '''Comprueba si el estudiante ya tiene acreditados los créditos de la 
     actividad y, si no, si ha completado la encuesta los acredita.
@@ -109,7 +111,7 @@ def _acreditar_creditos(
     result = db.execute(
         update(Estudiante)
         .where(Estudiante.user_id == user_id)
-        .values(creditos_acreditados=Estudiante.creditos_acreditados + float(cantidad))
+        .values(creditos_acreditados=Estudiante.creditos_acreditados + cantidad)
     )
     if result.rowcount != 1:
         raise AsistenciaError("No se pudo actualizar el registro de créditos del estudiante.")
@@ -132,13 +134,13 @@ def creditos_pendientes_encuesta(db: Session, actividad_id: int, user_id: int) -
 
 def acreditar_creditos_pendientes(
     db: Session, actividad_id: int, user_id: int
-) -> float:
+) -> Decimal:
     '''Acredita los créditos pendientes de encuesta para un estudiante en una actividad.
-    Devuelve la cantidad de créditos acreditados (0.0 si no se acreditó nada).
+    Devuelve la cantidad de créditos acreditados.
     '''
     actividad = db.get(Actividad, actividad_id)
     if actividad is None:
-        return 0.0
+        return Decimal("0")
     pendientes = (
         db.query(Asistencia)
         .filter(
@@ -148,9 +150,9 @@ def acreditar_creditos_pendientes(
         )
         .all()
     )
-    acreditados = 0.0
+    acreditados = Decimal("0")
     for _ in pendientes:
-        cantidad = float(actividad.creditos)
+        cantidad = actividad.creditos
         if _acreditar_creditos(db, actividad_id, user_id, cantidad):
             acreditados += cantidad
     return acreditados
@@ -495,7 +497,7 @@ def check_in(db: Session, token: str, user_id: int) -> Actividad:
         Asistencia(
             actividad_id=ventana_asistencia.actividad_id,
             user_id=user_id,
-            validated_by=None,
+            validated_by=user_id,
             estado_creditos=ESTADO_CREDITOS_PENDIENTE_ENCUESTA,
         )
     )
@@ -522,6 +524,15 @@ def mark_present_manual(
     Mirrors the guards in check_in(): the target must be a real estudiante enrolled
     in the actividad, so asistencia/credits cannot be fabricated for arbitrary ids.
     """
+    validator = db.get(User, validated_by)
+    if validator is None or validator.rol not in {
+        ROL_COORDINACION,
+        ROL_DOCENTE,
+    }:
+        raise AsistenciaError(
+            "El validador debe ser coordinación o un docente autorizado."
+        )
+
     target = db.get(User, user_id)
     if target is None or target.rol != ROL_ESTUDIANTE:
         raise AsistenciaError("El usuario indicado no es un estudiante válido.")
@@ -575,7 +586,7 @@ def revoke_present(db: Session, actividad_id: int, user_id: int) -> bool:
         estudiante = db.get(Estudiante, user_id)
         if actividad is None or estudiante is None:
             raise AsistenciaError("No se pudieron revertir los créditos de la asistencia.")
-        estudiante.creditos_acreditados -= float(actividad.creditos)
+        estudiante.creditos_acreditados -= actividad.creditos
         if estudiante.creditos_acreditados < 0:
             raise AsistenciaError("No se pudieron revertir los créditos de la asistencia.")
     db.delete(attendance)

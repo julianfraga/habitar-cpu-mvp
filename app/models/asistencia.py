@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint, func, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -11,12 +11,20 @@ from app.models.enums import ESTADO_CREDITOS_ACREDITADO
 
 class Asistencia(Base):
     __tablename__ = "asistencia"
-    __table_args__ = (UniqueConstraint("actividad_id", "user_id", name="uq_asistencia_actividad_user"),)
+    __table_args__ = (
+        CheckConstraint(
+            "estado_creditos IN ('acreditado', 'pendiente_encuesta')",
+            name="ck_asistencia_estado_creditos_valido",
+        ),
+        UniqueConstraint("actividad_id", "user_id", name="uq_asistencia_actividad_user"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     actividad_id: Mapped[int] = mapped_column(ForeignKey("actividades.id"), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    validated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    validated_by: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
     validated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     estado_creditos: Mapped[str] = mapped_column(
         String(30),

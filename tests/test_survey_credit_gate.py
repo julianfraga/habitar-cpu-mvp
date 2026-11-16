@@ -196,6 +196,7 @@ def test_revoking_credited_attendance_reverses_credits(
         Asistencia(
             actividad_id=activity.id,
             user_id=student.id,
+            validated_by=student.id,
             estado_creditos=ESTADO_CREDITOS_ACREDITADO,
         )
     )

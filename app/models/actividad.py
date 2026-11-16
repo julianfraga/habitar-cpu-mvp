@@ -30,6 +30,19 @@ class Actividad(Base):
     __tablename__ = "actividades"
     __table_args__ = (
         CheckConstraint(
+            "fecha_fin >= fecha_inicio",
+            name="ck_actividades_fecha_fin_no_anterior",
+        ),
+        CheckConstraint("cupo_max > 0", name="ck_actividades_cupo_positivo"),
+        CheckConstraint(
+            "tipo IN ('presencial', 'virtual')",
+            name="ck_actividades_tipo_valido",
+        ),
+        CheckConstraint(
+            "estado IN ('borrador', 'publicada', 'cancelada')",
+            name="ck_actividades_estado_valido",
+        ),
+        CheckConstraint(
             "creditos > 0 AND creditos * 2 = CAST(creditos * 2 AS INTEGER)",
             name="ck_actividades_creditos_positivo_multiplo_medio",
         ),
@@ -37,13 +50,24 @@ class Actividad(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     titulo: Mapped[str] = mapped_column(String(200))
-    descripcion: Mapped[str] = mapped_column(Text, default="")
-    tipo: Mapped[str] = mapped_column(String(20), default=TIPO_PRESENCIAL)
+    descripcion: Mapped[str] = mapped_column(
+        Text, default="", server_default=text("''")
+    )
+    tipo: Mapped[str] = mapped_column(
+        String(20),
+        default=TIPO_PRESENCIAL,
+        server_default=text(f"'{TIPO_PRESENCIAL.value}'"),
+    )
     fecha_inicio: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     fecha_fin: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    lugar: Mapped[str] = mapped_column(String(200), default="")
+    lugar: Mapped[str] = mapped_column(
+        String(200), default="", server_default=text("''")
+    )
     creditos: Mapped[Decimal] = mapped_column(
-        Numeric(8, 2), nullable=False, default=Decimal("1.0")
+        Numeric(8, 1),
+        nullable=False,
+        default=Decimal("1.0"),
+        server_default=text("1.0"),
     )
     encuesta_obligatoria: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
@@ -52,24 +76,31 @@ class Actividad(Base):
         Boolean, nullable=False, default=False, server_default=text("false")
     )
     preguntas: Mapped[dict[str, str]] = mapped_column(
-        JSON, nullable=False, default=dict
+        JSON, nullable=False, default=dict, server_default=text("'{}'")
     )
-    cupo_max: Mapped[int] = mapped_column(Integer, default=30)
-    estado: Mapped[str] = mapped_column(String(20), default=ESTADO_BORRADOR, index=True)
+    cupo_max: Mapped[int] = mapped_column(
+        Integer, default=30, server_default=text("30")
+    )
+    estado: Mapped[str] = mapped_column(
+        String(20),
+        default=ESTADO_BORRADOR,
+        server_default=text(f"'{ESTADO_BORRADOR.value}'"),
+        index=True,
+    )
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     docentes: Mapped[list["Docente"]] = relationship(
         secondary="actividad_docente", back_populates="actividades"
     )
     inscripciones: Mapped[list["Inscripcion"]] = relationship(
-        back_populates="actividad", cascade="all, delete-orphan"
+        back_populates="actividad", passive_deletes="all"
     )
     carreras_asociadas: Mapped[list["Carrera"]] = relationship(
         secondary=actividad_carrera,
         back_populates="actividades",
     )
     respuestas_encuesta: Mapped[list["RespuestaEncuesta"]] = relationship(
-        back_populates="actividad", cascade="all, delete-orphan"
+        back_populates="actividad", passive_deletes="all"
     )
     @property
     def finalizada(self) -> bool:

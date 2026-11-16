@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Integer, String
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -13,9 +13,15 @@ from app.models.associations import actividad_carrera
 
 class Carrera(Base):
     __tablename__ = "carreras"
+    __table_args__ = (
+        CheckConstraint(
+            "creditos_requeridos > 0",
+            name="ck_carreras_creditos_requeridos_positivo",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    nombre: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    nombre: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
     creditos_requeridos: Mapped[int] = mapped_column(Integer, nullable=False)
     tipo_id: Mapped[int] = mapped_column(Integer, ForeignKey("tipos_carrera.id"), nullable=False)
     tipo = relationship("TipoCarrera", back_populates="carreras")

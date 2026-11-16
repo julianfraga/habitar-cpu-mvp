@@ -21,6 +21,7 @@ from app.models import (
     Inscripcion,
     INSCRIPCION_ALTA,
     Persona,
+    TODAS_LAS_CARRERAS_STRING,
     User,
 )
 from app.security import hash_password
@@ -162,6 +163,14 @@ def test_admin_activities_crud_lifecycle(admin_actividades_client):
     new_page = client.get("/admin/actividades/nueva")
     assert new_page.status_code == 200
     assert "Nueva actividad" in new_page.text
+    assert (
+        f'data-all-careers-value="{TODAS_LAS_CARRERAS_STRING}"'
+        in new_page.text
+    )
+    assert (
+        f'value="{TODAS_LAS_CARRERAS_STRING}">-- TODAS LAS CARRERAS --'
+        in new_page.text
+    )
     assert 'aria-label="Eliminar pregunta"' in new_page.text
     assert 'title="Pregunta' not in new_page.text
 
@@ -187,6 +196,10 @@ def test_admin_activities_crud_lifecycle(admin_actividades_client):
         params={"carreras_asociadas": str(carrera.id)},
     )
     assert panel_response.status_code == 200
+    assert (
+        f'data-all-careers-value="{TODAS_LAS_CARRERAS_STRING}"'
+        in panel_response.text
+    )
     assert f"carreras_asociadas={carrera.id}&amp;sort=nombre&amp;direction=asc" in panel_response.text
     sorted_panel_response = client.get(
         "/admin/actividades",
@@ -857,6 +870,7 @@ def test_disabling_activity_survey_releases_pending_credits(
         Asistencia(
             actividad_id=activity.id,
             user_id=student.id,
+            validated_by=student.id,
             estado_creditos=ESTADO_CREDITOS_PENDIENTE_ENCUESTA,
         )
     )
