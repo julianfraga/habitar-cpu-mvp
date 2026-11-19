@@ -68,6 +68,7 @@ class Settings:
     
     # Entorno configurable con fallback explícito
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "production").lower()
+    DEMO_PASSWORD: str = os.getenv("DEMO_PASSWORD", "").strip()
 
     @property
     def IS_PRODUCTION(self) -> bool:

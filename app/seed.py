@@ -1,49 +1,17 @@
-"""Idempotent demo seed: SIU legajos, staff/students, actividades, FAQ y carreras."""
+"""Seed the coordinator account and careers required by the application."""
 from __future__ import annotations
-
-from datetime import datetime, timedelta, timezone
-from typing import Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import (
-    Actividad,
-    Asistencia,
-    Carrera,
-    Docente,
-    ESTADO_PUBLICADA,
-    Estudiante,
-    Inscripcion,
-    INSCRIPCION_ALTA,
-    Faq,
-    FaqCategoria,
-    ROL_COORDINACION,
-    ROL_DIRECTOR,
-    ROL_DOCENTE,
-    ROL_ESTUDIANTE,
-    TIPO_PRESENCIAL,
-    TIPO_VIRTUAL,
-    TipoCarrera,
-    User,
-)
+from app.config import settings
+from app.models import Carrera, ROL_COORDINACION, TipoCarrera, User
 from app.models.persona import Persona
 from app.security import hash_password, verify_password
 
 
-
-LEGAJOS = [
-    ("1001", "Ana Pérez"),
-    ("1002", "Bruno Díaz"),
-    ("1003", "Carla Gómez"),
-    ("1004", "Diego López"),
-    ("1005", "Elena Ruiz"),
-    ("1006", "Federico Sosa"),
-    ("1007", "Gabriela Núñez"),
-    ("1008", "Hernán Torres"),
-    ("2001", "Julián Fraga"),
-    ("2002", "Martín Groisman"),
-]
+COORDINATOR_EMAIL = "coordinacion@unsam.edu.ar"
+COORDINATOR_NAME = ("Laura", "Rasia")
 
 CARRERAS = [
     ("Ambiental", "Ingeniería", 20),
@@ -61,206 +29,62 @@ CARRERAS = [
 ]
 
 
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _get_or_create_user(db: Session, email: str, **fields) -> User:
-    persona = db.query(Persona).filter(Persona.email == email).first()
-    rol = fields.pop("rol", None)
-    nombre = fields.pop("nombre", "Sin Nombre")
-    apellido = fields.pop("apellido", "Sin Apellido")
-    carrera_id = fields.pop("carrera_id", None)
-    if persona and persona.usuario:
-        # Las cuentas creadas por este seed son cuentas demo: mantener su contraseña
-        # documentada permite recuperar el acceso después de cambios de base o hash.
-        user = persona.usuario
-        if not verify_password(DEMO_PASSWORD, user.pw_hash):
-            user.pw_hash = hash_password(DEMO_PASSWORD)
-            db.flush()
-        if user.rol == ROL_ESTUDIANTE and user.estudiante is None:
-            user.estudiante = Estudiante(carrera_id=carrera_id)
-        if user.rol == ROL_DOCENTE and user.persona.docente is None:
-            user.persona.docente = Docente()
-        return user
-
-    if rol is None:
-        raise ValueError(f"Debe asignarse un rol al usuario asociado a {email}")
-
-    if rol == ROL_ESTUDIANTE and not carrera_id:
-        raise ValueError(f"Debe asignarse una o más carreras al usuario asociado a {email} por ser de tipo Estudiante")
-
-    if not persona:
-        persona = Persona(email=email, nombre=nombre, apellido=apellido)
+def _get_or_create_coordinator(db: Session, password: str) -> User:
+    persona = db.scalar(select(Persona).where(Persona.email == COORDINATOR_EMAIL))
+    if persona is None:
+        persona = Persona(
+            email=COORDINATOR_EMAIL,
+            nombre=COORDINATOR_NAME[0],
+            apellido=COORDINATOR_NAME[1],
+        )
         db.add(persona)
-        db.flush()  # Para obtener el persona.id
+        db.flush()
 
-    user = User(
-        persona=persona,
-        pw_hash=hash_password(DEMO_PASSWORD),
-        rol=rol,
-        **fields
-    )
-    if rol == ROL_ESTUDIANTE:
-        user.estudiante = Estudiante(carrera_id=carrera_id)
-    elif rol == ROL_DOCENTE and persona.docente is None:
-        persona.docente = Docente()
-    db.add(user)
-    db.flush()
+    user = persona.usuario
+    if user is None:
+        user = User(
+            persona=persona,
+            pw_hash=hash_password(password),
+            rol=ROL_COORDINACION,
+        )
+        db.add(user)
+    elif user.rol != ROL_COORDINACION:
+        raise ValueError(
+            f"El usuario {COORDINATOR_EMAIL} ya existe con un rol distinto de coordinación."
+        )
+    elif not verify_password(password, user.pw_hash):
+        user.pw_hash = hash_password(password)
+
     return user
 
 
-def seed_all(db: Session) -> None:
-    # --- Tipos de Carrera ---
-    tipos_map = {}
-    for tipo_nombre in ["Licenciatura", "Ingeniería"]:
-        tipo_obj = db.query(TipoCarrera).filter(TipoCarrera.nombre == tipo_nombre).first()
-        if not tipo_obj:
-            tipo_obj = TipoCarrera(nombre=tipo_nombre)
-            db.add(tipo_obj)
+def _seed_carreras(db: Session) -> None:
+    tipos_por_nombre: dict[str, TipoCarrera] = {}
+    for tipo_nombre in dict.fromkeys(tipo for _, tipo, _ in CARRERAS):
+        tipo = db.scalar(select(TipoCarrera).where(TipoCarrera.nombre == tipo_nombre))
+        if tipo is None:
+            tipo = TipoCarrera(nombre=tipo_nombre)
+            db.add(tipo)
             db.flush()
-        tipos_map[tipo_nombre] = tipo_obj.id
+        tipos_por_nombre[tipo_nombre] = tipo
 
-    # --- Carreras ---
-    if db.query(Carrera).count() == 0:
-        for nombre_carrera, tipo_nombre, creditos_requeridos in CARRERAS:
-            tipo_id = tipos_map[tipo_nombre]
-            db.add(Carrera(
-                nombre=nombre_carrera,
-                tipo_id=tipo_id,
-                creditos_requeridos=creditos_requeridos,
-            ))
+    for nombre, tipo_nombre, creditos_requeridos in CARRERAS:
+        carrera_id = db.scalar(select(Carrera.id).where(Carrera.nombre == nombre))
+        if carrera_id is None:
+            db.add(
+                Carrera(
+                    nombre=nombre,
+                    tipo_id=tipos_por_nombre[tipo_nombre].id,
+                    creditos_requeridos=creditos_requeridos,
+                )
+            )
 
 
+def seed_all(db: Session) -> None:
+    password = settings.DEMO_PASSWORD.strip()
+    if not password:
+        raise RuntimeError("DEMO_PASSWORD debe estar configurada para ejecutar el seeding.")
 
-    # --- FAQ ---
-    faq_categoria = db.query(FaqCategoria).order_by(FaqCategoria.id).first()
-    if faq_categoria is None:
-        faq_categoria = FaqCategoria(nombre="General")
-        db.add(faq_categoria)
-        db.flush()
-    if db.query(Faq).count() == 0:
-        db.add_all(
-            [
-                Faq(categoria_id=faq_categoria.id, pregunta="¿Cómo me inscribo en una actividad?",
-                    respuesta="Entrá a 'Actividades', abrí el detalle y tocá 'Inscribirme'. El sistema controla el cupo automáticamente."),
-                Faq(categoria_id=faq_categoria.id, pregunta="¿Cómo registro mi asistencia?",
-                    respuesta="En la actividad, el docente muestra un código QR. Abrí 'Registrar asistencia' y escaneá o ingresá el código de 6 dígitos."),
-                Faq(categoria_id=faq_categoria.id, pregunta="¿Cuántos créditos necesito para aprobar?",
-                    respuesta="Necesitás los créditos requeridos por tu carrera. Podés ver tu progreso en el inicio."),
-                Faq(categoria_id=faq_categoria.id, pregunta="¿Puedo darme de baja de una actividad?",
-                    respuesta="Sí, desde el detalle de la actividad podés liberar tu cupo si no vas a asistir."),
-            ]
-        )
-
-    # --- users ---
-    coord = _get_or_create_user(
-        db, "coordinacion@unsam.edu.ar", nombre="Laura", apellido="Rasia",
-        rol=ROL_COORDINACION
-    )
-    docente = _get_or_create_user(
-        db, "docente@unsam.edu.ar", nombre="Pablo", apellido="Méndez",
-        rol=ROL_DOCENTE
-    )
-    _get_or_create_user(
-        db, "director@unsam.edu.ar", nombre="Marcela", apellido="Vega",
-        rol=ROL_DIRECTOR
-    )
-
-    lic_datos = db.query(Carrera).filter(Carrera.nombre == 'Ciencia de Datos').first()
-
-    ing_electronica = (
-        db.query(Carrera)
-        .join(TipoCarrera)
-        .filter(
-            Carrera.nombre == "Electrónica",
-            TipoCarrera.nombre == "Ingeniería"
-        )
-        .first()  # Devuelve la instancia de Carrera o None
-    )
-
-    ana = _get_or_create_user(
-        db, "ana@alumno.unsam.edu.ar", nombre="Ana", apellido="Pérez",
-        rol=ROL_ESTUDIANTE, carrera_id=lic_datos.id,#type: ignore
-    )
-    bruno = _get_or_create_user(
-        db, "bruno@alumno.unsam.edu.ar", nombre="Bruno", apellido="Díaz",
-        rol=ROL_ESTUDIANTE, carrera_id=ing_electronica.id,#type: ignore
-    )
-    julian = _get_or_create_user(
-            db, "julian@alumno.unsam.edu.ar", nombre="Julian", apellido="Fraga",
-            rol=ROL_ESTUDIANTE, carrera_id=lic_datos.id,#type: ignore
-        )
-    db.flush()
-
-    # --- actividades (only seed once) ---
-    if db.query(Actividad).count() == 0:
-        now = _now()
-        carrera_1 = db.query(Carrera).get(1)
-        carrera_2 = db.query(Carrera).get(2)
-        carrera_3 = db.query(Carrera).get(3)
-        acts = [
-            Actividad(
-                titulo="Bienvenida al campus",
-                descripcion="Recorrido guiado por la ECyT y presentación del Módulo Habitar.",
-                tipo=TIPO_PRESENCIAL, fecha_inicio=now - timedelta(days=7),
-                fecha_fin=now - timedelta(days=7) + timedelta(hours=2),
-                lugar="Hall central - Campus Miguelete", docentes=[docente.docente],
-                creditos=2, cupo_max=40, estado=ESTADO_PUBLICADA, created_by=coord.id,carreras_asociadas = [lic_datos,carrera_1, carrera_2]
-            ),
-            Actividad(
-                titulo="Taller de hábitos de estudio",
-                descripcion="Estrategias para organizar el tiempo y estudiar en la universidad.",
-                tipo=TIPO_PRESENCIAL, fecha_inicio=now + timedelta(hours=24),
-                fecha_fin=now + timedelta(hours=26),
-                lugar="Aula 12 - Tornavía", docentes=[docente.docente],
-                creditos=3, cupo_max=2, estado=ESTADO_PUBLICADA, created_by=coord.id,carreras_asociadas = [lic_datos, carrera_1, carrera_2]
-            ),
-            Actividad(
-                titulo="Charla: vida universitaria",
-                descripcion="Egresados cuentan su experiencia y responden preguntas.",
-                tipo=TIPO_VIRTUAL, fecha_inicio=now + timedelta(days=5),
-                fecha_fin=now + timedelta(days=5) + timedelta(hours=1, minutes=30),
-                lugar="Zoom (link por mail)", docentes=[docente.docente],
-                creditos=2, cupo_max=100, estado=ESTADO_PUBLICADA, created_by=coord.id,carreras_asociadas =[carrera_1, carrera_3]
-            ),
-            Actividad(
-                titulo="Laboratorio abierto de Física",
-                descripcion="Experiencias prácticas en el laboratorio de física.",
-                tipo=TIPO_PRESENCIAL, fecha_inicio=now + timedelta(days=10),
-                fecha_fin=now + timedelta(days=10) + timedelta(hours=3),
-                lugar="Lab 3 - Pabellón de Física", docentes=[docente.docente],
-                creditos=4, cupo_max=15, estado=ESTADO_PUBLICADA, created_by=coord.id,carreras_asociadas = [carrera_1, carrera_2]
-            ),
-            Actividad(
-                titulo="Borrador: Taller de escritura",
-                descripcion="Pendiente de revisión, todavía sin publicar.",
-                tipo=TIPO_PRESENCIAL, fecha_inicio=now + timedelta(days=14),
-                fecha_fin=now + timedelta(days=14) + timedelta(hours=2),
-                lugar="Aula 5", docentes=[docente.docente],
-                creditos=2, cupo_max=20, estado="borrador", created_by=coord.id,carreras_asociadas = [carrera_3]
-            ),
-            Actividad(
-                titulo="Taller de Python",
-                descripcion="Pendiente de revisión, todavía sin publicar.",
-                tipo=TIPO_PRESENCIAL, fecha_inicio=now + timedelta(days=14),
-                fecha_fin=now + timedelta(days=14) + timedelta(hours=2),
-                lugar="Aula 5", docentes=[docente.docente],
-                creditos=2, cupo_max=20, estado="borrador", created_by=coord.id,carreras_asociadas = [carrera_3, carrera_2]
-            ),
-        ]
-        db.add_all(acts)
-        db.flush()
-
-        bienvenida, taller, charla = acts[0], acts[1], acts[2]
-        # Ana attended the welcome (past) -> has credits, and is enrolled in upcoming ones.
-        db.add_all([
-            Inscripcion(actividad_id=bienvenida.id, user_id=ana.id, estado=INSCRIPCION_ALTA),
-            Inscripcion(actividad_id=taller.id, user_id=ana.id, estado=INSCRIPCION_ALTA),
-            Inscripcion(actividad_id=charla.id, user_id=ana.id, estado=INSCRIPCION_ALTA),
-            Inscripcion(actividad_id=bienvenida.id, user_id=bruno.id, estado=INSCRIPCION_ALTA),
-        ])
-        db.add(Asistencia(actividad_id=bienvenida.id, user_id=ana.id, validated_by=docente.id))
-        ana.estudiante.creditos_acreditados += bienvenida.creditos
-
+    _get_or_create_coordinator(db, password)
+    _seed_carreras(db)
     db.commit()
