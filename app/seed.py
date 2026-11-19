@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.database import SessionLocal
 from app.models import Carrera, ROL_COORDINACION, TipoCarrera, User
 from app.models.persona import Persona
 from app.security import hash_password, verify_password
@@ -88,3 +89,12 @@ def seed_all(db: Session) -> None:
     _get_or_create_coordinator(db, password)
     _seed_carreras(db)
     db.commit()
+
+
+def main() -> None:
+    with SessionLocal() as db:
+        seed_all(db)
+
+
+if __name__ == "__main__":
+    main()

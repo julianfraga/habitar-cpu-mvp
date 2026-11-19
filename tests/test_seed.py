@@ -1,7 +1,10 @@
+from unittest.mock import MagicMock
+
 import pytest
 from sqlalchemy import func, select
 
 from app.config import settings
+import app.seed as seed_module
 from app.models import (
     Actividad,
     Asistencia,
@@ -60,3 +63,19 @@ def test_seed_requires_demo_password_before_writing(db_session, monkeypatch):
 
     assert db_session.scalar(select(func.count()).select_from(User)) == 0
     assert db_session.scalar(select(func.count()).select_from(Carrera)) == 0
+
+
+def test_seed_module_entrypoint_runs_seed_in_session(monkeypatch):
+    session = object()
+    session_context = MagicMock()
+    session_context.__enter__.return_value = session
+    session_factory = MagicMock(return_value=session_context)
+    seed_mock = MagicMock()
+    monkeypatch.setattr(seed_module, "SessionLocal", session_factory)
+    monkeypatch.setattr(seed_module, "seed_all", seed_mock)
+
+    seed_module.main()
+
+    session_factory.assert_called_once_with()
+    seed_mock.assert_called_once_with(session)
+    session_context.__exit__.assert_called_once()

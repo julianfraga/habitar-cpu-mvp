@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -11,7 +10,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
-from app.database import Base, SessionLocal, engine
+from app.database import SessionLocal
 from app.models import (
     ROL_COORDINACION,
     ROL_DIRECTOR,
@@ -19,45 +18,23 @@ from app.models import (
     ROL_ESTUDIANTE,
 )
 from app.routers import main_router
-# from app.routers.admin import admin_actividades, admin_carreras, admin_enroll
-
 from app.scheduler import start_scheduler
-from app.security import NotAuthenticated, NotAuthorized,CarreraPendienteException, get_current_user
-from app.seed import seed_all
+from app.security import (
+    CarreraPendienteException,
+    NotAuthenticated,
+    NotAuthorized,
+    get_current_user,
+)
 from app.templating import redirect_to, render
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("habitar.startup")
 
 
-def _init_database(attempts: int = 5, delay: float = 2.0) -> None:
-    """Create tables and seed, with a bounded retry so a cold Neon endpoint can wake."""
-    last: Exception | None = None
-    for i in range(attempts):
-        try:
-            Base.metadata.create_all(bind=engine)
-            db = SessionLocal()
-            try:
-                seed_all(db)
-            finally:
-                db.close()
-            return
-        except Exception as exc:  # noqa: BLE001 - retry transient DB/cold-start errors
-            last = exc
-            log.warning("DB init attempt %d/%d failed: %s", i + 1, attempts, exc)
-            time.sleep(delay)
-    if last is not None:
-        raise last
-
-
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # Never let a cold/unavailable DB abort the boot: the health check must pass so
-    # Render keeps the service up, and request-time access retries once Neon is warm.
-    try:
-        _init_database()
-    except Exception:  # noqa: BLE001
-        log.exception("Database init/seed failed at startup; continuing so the app can boot.")
+    # Schema migrations (alembic upgrade head) and seeding (python -m app.seed)
+    # run prior to starting Uvicorn; lifespan only manages background runtime tasks.
     try:
         start_scheduler()
     except Exception:  # noqa: BLE001
@@ -79,8 +56,8 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 # ---- Auth control-flow -> friendly redirects -------------------------------
 @app.exception_handler(CarreraPendienteException)
 async def carrera_pendiente_exception_handler(request: Request, exc: CarreraPendienteException):
-    # Usas tu helper pasando el nombre del endpoint (ej. "seleccionar_carrera_form")
     return redirect_to(request, "seleccionar_carrera_form")
+
 
 @app.exception_handler(NotAuthenticated)
 async def _not_authenticated(request: Request, _exc: NotAuthenticated):
@@ -145,7 +122,8 @@ async def root(request: Request):
         return redirect_to(request, "dashboard")
     return redirect_to(request, "home")
 
+
 if __name__ == "__main__":
     import uvicorn
-    # Arranca el servidor ASGI localmente en el puerto 8000
+
     uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
