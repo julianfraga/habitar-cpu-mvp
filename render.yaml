@@ -7,6 +7,8 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false   # paste the Neon connection string in the Render dashboard
+      - key: DEMO_PASSWORD
+        sync: false   
       - key: SECRET_KEY
         generateValue: true
       - key: APP_NAME
