@@ -21,7 +21,7 @@ class Persona(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     nombre: Mapped[str] = mapped_column(String(120), nullable=False)
     apellido: Mapped[str] = mapped_column(String(120), nullable=False)
-    email: Mapped[str | None] = mapped_column(String(254), nullable=True, unique=True)
+    email: Mapped[str | None] = mapped_column(String(120), nullable=True, unique=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

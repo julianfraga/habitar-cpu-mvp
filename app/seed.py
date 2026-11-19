@@ -30,7 +30,7 @@ from app.models import (
 from app.models.persona import Persona
 from app.security import hash_password, verify_password
 
-DEMO_PASSWORD = "habitar123"
+
 
 LEGAJOS = [
     ("1001", "Ana Pérez"),
