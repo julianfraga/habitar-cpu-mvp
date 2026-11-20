@@ -82,10 +82,12 @@ class Settings:
     SECRET_KEY: str = _resolve_secret_key()
     SESSION_HTTPS_ONLY: bool = os.getenv("SESSION_HTTPS_ONLY", "").lower() in ("1", "true", "yes")
     SMTP_HOST: str = os.getenv("SMTP_HOST", "")
-    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_PORT: int = _integer_setting("SMTP_PORT", 587)
     SMTP_USER: str = os.getenv("SMTP_USER", "")
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
-    SMTP_FROM: str = os.getenv("SMTP_FROM", "Modulo Habitar <no-reply@example.com>")
+    SMTP_FROM: str = os.getenv("SMTP_FROM", "")
+    SMTP_MAX_POR_HORA:int = _integer_setting("SMTP_MAX_POR_HORA", 450)
+    SMTP_MAX_DIARIO:int = _integer_setting("SMTP_MAX_DIARIO", 1800)
     MARGEN_BAJA_HORAS: int = _integer_setting("MARGEN_BAJA_HORAS", 24)
     CIERRE_INSCRIPCIONES_HORAS: int = _integer_setting(
         "CIERRE_INSCRIPCIONES_HORAS", 1

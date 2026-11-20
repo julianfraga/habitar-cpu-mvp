@@ -17,10 +17,15 @@ def send_email(
     *,
     attachments: list[tuple[str, bytes, str]] | None = None,
 ) -> bool:
+    if settings.ENVIRONMENT == "development":
+        print(
+            f"[DEV EMAIL]\nTo: {to}\nSubject: {subject}\n"
+            f"Attachments: {len(attachments or [])}\n---\n{body}\n---",
+            flush=True,
+        )
+        return True
+
     if not settings.SMTP_HOST:
-        if settings.ENVIRONMENT == "development":
-            logger.info("EMAIL (console backend) -> %s | %s\n%s", to, subject, body)
-            return True
         logger.warning("Email not sent because SMTP_HOST is not configured.")
         return False
 
@@ -51,7 +56,7 @@ def send_email(
 
 def enviar_mails_verificacion(contenido:list[dict]) -> None:
     for usuario in contenido:
-        cuerpo = f'Hola {usuario['nombre']} {usuario['apellido']},\ningresá a habitardigital.com con tu dirección de correo {usuario['email']} y contraseña {usuario['password_temporal']}'
+        cuerpo = f"Hola {usuario['nombre']} {usuario['apellido']},\ningresá a habitardigital.com con tu dirección de correo {usuario['email']} y contraseña {usuario['password_temporal']}"
         send_email(
             to = usuario['email'],
             subject = 'HABITAR DIGITAL - Alta de usuario',
