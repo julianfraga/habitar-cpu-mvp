@@ -67,7 +67,7 @@ class Settings:
     DATABASE_URL: str = _normalize_db_url(os.getenv("DATABASE_URL", ""))
     
     # Entorno configurable con fallback explícito
-    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "production").lower()
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "").lower()
     DEMO_PASSWORD: str = os.getenv("DEMO_PASSWORD", "").strip()
 
     @property
@@ -79,6 +79,16 @@ class Settings:
         db_url = self.DATABASE_URL.lower()
         is_local = "localhost" in db_url or "127.0.0.1" in db_url or "sqlite" in db_url
         return not is_local and bool(db_url)
+    @property
+    def IS_TESTING(self) -> bool:
+        """Determina si la app corre en producción (por variable o por host de DB)."""
+        if self.ENVIRONMENT in ("test", "testing"):
+            return True
+        # Salvaguarda adicional: si la URL no es local, asumirlo como producción
+        db_url = self.DATABASE_URL.lower()
+        is_local = "localhost" in db_url or "127.0.0.1" in db_url or "sqlite" in db_url
+        return not is_local and bool(db_url)
+    
     SECRET_KEY: str = _resolve_secret_key()
     SESSION_HTTPS_ONLY: bool = os.getenv("SESSION_HTTPS_ONLY", "").lower() in ("1", "true", "yes")
     SMTP_HOST: str = os.getenv("SMTP_HOST", "")
